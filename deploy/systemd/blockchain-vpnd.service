@@ -1,0 +1,14 @@
+[Unit]
+Description=Blockchain VPN UDP Protocol Daemon
+After=network.target blockchain-vpn-api.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/blockchain-vpn/proto.env
+WorkingDirectory=%h/blockchain-vpn
+ExecStart=%h/blockchain-vpn/bin/blockchain-vpnd
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

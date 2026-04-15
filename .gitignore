@@ -1,0 +1,26 @@
+# Secrets / runtime config
+.env
+.env.*
+*.env
+
+# Local daemon runtime data (may contain sensitive metadata)
+data/*.json
+data/*.ndjson
+!data/.gitkeep
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# allow examples
+!*.env.example
+!scripts/target-client/.env.example
+
+# Go build output
+bin/

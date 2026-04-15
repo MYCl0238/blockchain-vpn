@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${BVPN_URL:-${VPND_URL:-http://127.0.0.1:8787}}"
+TOKEN="${BVPN_TOKEN:-${VPND_TOKEN:-}}"
+
+auth_args=()
+if [[ -n "$TOKEN" ]]; then
+  auth_args=(-H "Authorization: Bearer $TOKEN")
+fi
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  health)
+    curl -sS "$BASE_URL/health" ;;
+  status)
+    curl -sS "${auth_args[@]}" "$BASE_URL/v1/status" ;;
+  list)
+    curl -sS "${auth_args[@]}" "$BASE_URL/v1/profiles" ;;
+  add-profile)
+    if [[ $# -lt 3 ]]; then
+      echo "Usage: blockchain-vpnctl add-profile <id> <name> <command> [args...]" >&2
+      exit 1
+    fi
+    id="$1"; name="$2"; command="$3"; shift 3
+    args_json="$(printf '%s\n' "$@" | jq -R . | jq -s .)"
+    jq -n --arg id "$id" --arg name "$name" --arg command "$command" --argjson args "$args_json" \
+      '{id:$id,name:$name,command:$command,args:$args}' | \
+      curl -sS "${auth_args[@]}" -H 'content-type: application/json' -d @- "$BASE_URL/v1/profiles"
+    ;;
+  connect)
+    profileId="${1:-}"
+    [[ -n "$profileId" ]] || { echo "Usage: blockchain-vpnctl connect <profileId>" >&2; exit 1; }
+    jq -n --arg profileId "$profileId" '{profileId:$profileId}' | \
+      curl -sS "${auth_args[@]}" -H 'content-type: application/json' -d @- "$BASE_URL/v1/connect"
+    ;;
+  disconnect)
+    curl -sS "${auth_args[@]}" -X POST "$BASE_URL/v1/disconnect" ;;
+  proto-metrics)
+    curl -sS "${auth_args[@]}" "$BASE_URL/v1/proto/metrics" ;;
+  proto-sessions)
+    curl -sS "${auth_args[@]}" "$BASE_URL/v1/proto/sessions" ;;
+  proto-events)
+    limit="${1:-50}"
+    curl -sS "${auth_args[@]}" "$BASE_URL/v1/proto/events?limit=$limit" ;;
+  *)
+    cat <<USAGE
+Usage: blockchain-vpnctl <command>
+  health
+  status
+  list
+  add-profile <id> <name> <command> [args...]
+  connect <profileId>
+  disconnect
+  proto-metrics
+  proto-sessions
+  proto-events [limit]
+
+Env:
+  BVPN_URL/BVPN_TOKEN (fallback: VPND_URL/VPND_TOKEN)
+USAGE
+    ;;
+esac
+
+echo
