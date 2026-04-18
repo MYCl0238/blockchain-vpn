@@ -26,3 +26,9 @@ Authenticated endpoints (Bearer token):
 - `GET /v1/proto/sessions/:id`
 - `GET /v1/proto/events?limit=100`
 - `GET /v1/proto/metrics`
+
+## Profile process note
+
+- Control-plane `connect` now starts a **real process** for profile `demo` (Go protocol daemon), not sleep.
+- Profile template can be re-applied with `scripts/set-demo-profile.sh`.
+- For full VPN data-plane, implement/run local client worker on target device (TUN + routing).

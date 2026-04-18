@@ -17,4 +17,5 @@ source .env
 
 ## Not
 - Bu örnek, sunucudaki profile command'i başlatır/durdurur.
-- Gerçek VPN engine bağlandığında aynı akışla kullanılabilir.
+- `demo` profili artık `/usr/bin/sleep` değil, gerçek Go protocol daemon (`bin/blockchain-vpnd`) başlatır.
+- Tam VPN (internet trafiğinin tünelden geçmesi) için target cihazda ayrıca local client worker (TUN + route) gerekir.
