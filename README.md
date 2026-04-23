@@ -32,3 +32,10 @@ Authenticated endpoints (Bearer token):
 - Control-plane `connect` now starts a **real process** for profile `demo` (Go protocol daemon), not sleep.
 - Profile template can be re-applied with `scripts/set-demo-profile.sh`.
 - For full VPN data-plane, implement/run local client worker on target device (TUN + routing).
+
+
+## Target client worker (mobile + PC)
+
+- Added `protocol/udp/cmd/worker` as persistent cross-platform client worker (no TUN/root requirement).
+- Launcher: `scripts/target-client/run-worker.sh`
+- Build output: `bin/blockchain-vpn-target-worker`
