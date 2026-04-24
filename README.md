@@ -31,7 +31,7 @@ Authenticated endpoints (Bearer token):
 
 - Control-plane `connect` now starts a **real process** for profile `demo` (Go protocol daemon), not sleep.
 - Profile template can be re-applied with `scripts/set-demo-profile.sh`.
-- For full VPN data-plane, implement/run local client worker on target device (TUN + routing).
+- Full VPN data-plane için Linux'ta TUN katmanı eklendi (`cmd/tun-server`, `cmd/tun-client`).
 
 
 ## Target client worker (mobile + PC)
@@ -39,3 +39,10 @@ Authenticated endpoints (Bearer token):
 - Added `protocol/udp/cmd/worker` as persistent cross-platform client worker (no TUN/root requirement).
 - Launcher: `scripts/target-client/run-worker.sh`
 - Build output: `bin/blockchain-vpn-target-worker`
+
+
+## Full tunnel workers (Linux)
+
+- Server worker: `protocol/udp/cmd/tun-server` -> `bin/blockchain-vpn-tun-server`
+- Client worker: `protocol/udp/cmd/tun-client` -> `bin/blockchain-vpn-tun-client`
+- Gereksinim: root + `/dev/net/tun` + iptables (server tarafında NAT için)

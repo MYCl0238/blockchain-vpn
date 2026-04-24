@@ -24,14 +24,18 @@ source .env
 ./run-worker.sh
 ```
 
-## Build (target cihazda)
+## 3) Full VPN tunnel test (Linux root)
+
+Tam tünel için target cihazda TUN client çalıştır:
 
 ```bash
 cd ../../protocol/udp
-go build -o ../../bin/blockchain-vpn-target-worker ./cmd/worker
+go build -o ../../bin/blockchain-vpn-tun-client ./cmd/tun-client
+sudo ../../bin/blockchain-vpn-tun-client \
+  --tun bvpntun1 \
+  --tun-cidr 10.99.0.2/24 \
+  --server <SERVER_IP>:7001 \
+  --route-default=true
 ```
 
-## Not
-- `connect.sh` sunucudaki profile process yönetimi içindir (control-plane).
-- `run-worker.sh` target cihazdan protokol oturumu açar ve sürekli keepalive gönderir.
-- Full VPN data-plane (tüm internet trafiğini tünelden geçirmek) için ayrıca TUN + route katmanı eklenmelidir.
+> Not: mobilde root/VPN API olmadan tam sistem tüneli mümkün değildir; mobil için mevcut worker protokol oturumu/keepalive doğrular.
