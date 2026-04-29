@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${1:-}"
+PROFILE_NAME="${BVPN_TUN_PROFILE:-blockchain-vpn-client}"
+WG_QUICK_BIN="${WG_QUICK_BIN:-/usr/bin/wg-quick}"
+OVPN_UNIT_PREFIX="${OVPN_UNIT_PREFIX:-openvpn-client@}"
+
+# Preferred backend:
+#   BVPN_TUN_BACKEND=wireguard  -> wg-quick up/down <PROFILE_NAME>
+#   BVPN_TUN_BACKEND=openvpn    -> systemctl start/stop openvpn-client@<PROFILE_NAME>
+# Defaults to wireguard when not specified.
+BACKEND="${BVPN_TUN_BACKEND:-wireguard}"
+
+run_wireguard() {
+  if [[ ! -x "$WG_QUICK_BIN" ]]; then
+    echo "wg-quick not found at $WG_QUICK_BIN" >&2
+    exit 1
+  fi
+
+  case "$1" in
+    start) "$WG_QUICK_BIN" up "$PROFILE_NAME" ;;
+    stop) "$WG_QUICK_BIN" down "$PROFILE_NAME" ;;
+    *) echo "unsupported action for wireguard: $1" >&2; exit 1 ;;
+  esac
+}
+
+run_openvpn() {
+  local unit="${OVPN_UNIT_PREFIX}${PROFILE_NAME}"
+  case "$1" in
+    start) systemctl start "$unit" ;;
+    stop) systemctl stop "$unit" ;;
+    *) echo "unsupported action for openvpn: $1" >&2; exit 1 ;;
+  esac
+}
+
+do_action() {
+  local action="$1"
+  case "$BACKEND" in
+    wireguard) run_wireguard "$action" ;;
+    openvpn) run_openvpn "$action" ;;
+    *)
+      echo "Unsupported BVPN_TUN_BACKEND: $BACKEND (expected: wireguard|openvpn)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+case "$ACTION" in
+  start)
+    do_action start
+    ;;
+  stop)
+    do_action stop
+    ;;
+  restart)
+    do_action stop || true
+    do_action start
+    ;;
+  status)
+    if [[ "$BACKEND" == "wireguard" ]]; then
+      wg show || true
+    else
+      systemctl status "${OVPN_UNIT_PREFIX}${PROFILE_NAME}" --no-pager || true
+    fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac

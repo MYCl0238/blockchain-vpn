@@ -1,0 +1,18 @@
+[Unit]
+Description=Blockchain VPN Target Client Tunnel Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/default/blockchain-vpn-target-client
+ExecStart=/usr/local/bin/blockchain-vpn-client-tunnel start
+ExecStop=/usr/local/bin/blockchain-vpn-client-tunnel stop
+RemainAfterExit=yes
+TimeoutStartSec=45
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target
