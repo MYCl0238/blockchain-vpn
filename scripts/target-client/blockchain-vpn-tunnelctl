@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXIT_OK=0
+EXIT_USAGE=2
+EXIT_NOT_ROOT=10
+EXIT_NOT_ENABLED=11
+EXIT_START_FAILED=20
+EXIT_STOP_FAILED=21
+EXIT_STATUS_UNHEALTHY=22
+EXIT_BUSY=23
+EXIT_DEPENDENCY=30
+
+SERVICE_NAME="${BVPN_TUN_SERVICE_NAME:-blockchain-vpn-target-client.service}"
+ENV_FILE="${BVPN_TUN_ENV_FILE:-/etc/default/blockchain-vpn-target-client}"
+LOCK_FILE="${BVPN_TUN_LOCK_FILE:-/run/blockchain-vpn-tunnelctl.lock}"
+JSON_OUTPUT=0
+PRETTY_JSON=0
+
+load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
+}
+
+load_state() {
+  BACKEND="${BVPN_TUN_BACKEND:-wireguard}"
+  TUN_NAME="${BVPN_TUN_NAME:-bvpntun1}"
+  SERVER_ADDR="${BVPN_TUN_SERVER:-}"
+  PID_FILE="${BVPN_TUN_PID_FILE:-/run/blockchain-vpn-tun-client.pid}"
+}
+
+require_root() {
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    fail "$EXIT_NOT_ROOT" "must_run_as_root" "blockchain-vpn-tunnelctl must run as root"
+  fi
+}
+
+ensure_python() {
+  command -v python3 >/dev/null 2>&1 || fail "$EXIT_DEPENDENCY" "python3_required" "python3 is required"
+}
+
+acquire_lock() {
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    fail "$EXIT_BUSY" "busy" "another tunnel control operation is already running"
+  fi
+}
+
+service_active() {
+  systemctl is-active --quiet "$SERVICE_NAME"
+}
+
+service_enabled() {
+  systemctl is-enabled --quiet "$SERVICE_NAME"
+}
+
+custom_pid() {
+  if [[ -f "$PID_FILE" ]]; then
+    cat "$PID_FILE"
+  fi
+}
+
+custom_running() {
+  local pid
+  pid="$(custom_pid || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+route_uses_tun() {
+  ip route show default 2>/dev/null | grep -q "dev ${TUN_NAME}"
+}
+
+tun_has_addr() {
+  ip -brief addr show "$TUN_NAME" 2>/dev/null | grep -q "$TUN_NAME"
+}
+
+default_route_line() {
+  ip route show default 2>/dev/null | head -n 1 || true
+}
+
+server_route_line() {
+  if [[ -n "$SERVER_ADDR" ]]; then
+    local server_host="${SERVER_ADDR%%:*}"
+    ip route show "$server_host" 2>/dev/null | head -n 1 || true
+  fi
+}
+
+public_ip() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fsS --max-time 5 https://ifconfig.me || true
+  else
+    python3 - <<'PY'
+import socket, urllib.request
+try:
+    infos = socket.getaddrinfo("ifconfig.me", 443, socket.AF_INET, socket.SOCK_STREAM)
+    host = infos[0][4][0]
+    req = urllib.request.Request("https://ifconfig.me", headers={"Host": "ifconfig.me"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        print(resp.read().decode().strip())
+except Exception:
+    print("")
+PY
+  fi
+}
+
+collect_state() {
+  load_state
+
+  SERVICE_STATE="inactive"
+  ENABLED_STATE="disabled"
+  TUNNEL_STATE="down"
+  ROUTE_STATE="off"
+  PID_VALUE=""
+  DEFAULT_ROUTE="$(default_route_line)"
+  SERVER_ROUTE="$(server_route_line)"
+  PUBLIC_IP_VALUE=""
+
+  if service_active; then
+    SERVICE_STATE="active"
+  fi
+  if service_enabled; then
+    ENABLED_STATE="enabled"
+  fi
+  if tun_has_addr; then
+    TUNNEL_STATE="up"
+  fi
+  if route_uses_tun; then
+    ROUTE_STATE="on"
+  fi
+  if [[ "$BACKEND" == "custom" ]] && custom_running; then
+    PID_VALUE="$(custom_pid)"
+  fi
+}
+
+json_emit() {
+  local ok="$1"
+  local command="$2"
+  local code="$3"
+  local message="$4"
+  ensure_python
+
+  python3 - "$ok" "$command" "$code" "$message" "$SERVICE_STATE" "$ENABLED_STATE" "$BACKEND" "$TUNNEL_STATE" "$ROUTE_STATE" "$TUN_NAME" "$SERVER_ADDR" "$PID_VALUE" "$DEFAULT_ROUTE" "$SERVER_ROUTE" "$PUBLIC_IP_VALUE" "$PRETTY_JSON" <<'PY'
+import json, sys
+ok, command, code, message, service, enabled, backend, tunnel, default_route, tun_name, server, pid, default_route_line, server_route, public_ip, pretty = sys.argv[1:17]
+doc = {
+    "ok": ok == "true",
+    "command": command,
+    "code": code,
+    "message": message,
+    "state": {
+        "service": service,
+        "enabled": enabled,
+        "backend": backend,
+        "tunnel": tunnel,
+        "default_route": default_route,
+        "tun_name": tun_name,
+        "server": server,
+        "pid": pid or None,
+        "default_route_line": default_route_line,
+        "server_route_line": server_route,
+        "public_ip": public_ip or None,
+    },
+}
+if pretty == "1":
+    print(json.dumps(doc, indent=2))
+else:
+    print(json.dumps(doc))
+PY
+}
+
+text_emit() {
+  cat <<EOF
+service=${SERVICE_STATE}
+enabled=${ENABLED_STATE}
+backend=${BACKEND}
+tunnel=${TUNNEL_STATE}
+default_route=${ROUTE_STATE}
+tun_name=${TUN_NAME}
+server=${SERVER_ADDR}
+pid=${PID_VALUE}
+default_route_line=${DEFAULT_ROUTE}
+server_route_line=${SERVER_ROUTE}
+public_ip=${PUBLIC_IP_VALUE}
+EOF
+}
+
+emit_result() {
+  local ok="$1"
+  local command="$2"
+  local code="$3"
+  local message="$4"
+  if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+    json_emit "$ok" "$command" "$code" "$message"
+  else
+    text_emit
+  fi
+}
+
+fail() {
+  local exit_code="$1"
+  local code="$2"
+  local message="$3"
+  collect_state || true
+  emit_result "false" "${ACTIVE_COMMAND:-unknown}" "$code" "$message"
+  exit "$exit_code"
+}
+
+parse_args() {
+  ACTIVE_COMMAND="status"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --pretty) JSON_OUTPUT=1; PRETTY_JSON=1 ;;
+      --help|-h) ACTIVE_COMMAND="help" ;;
+      *)
+        ACTIVE_COMMAND="$1"
+        shift
+        EXTRA_ARGS=("$@")
+        return
+        ;;
+    esac
+    shift
+  done
+  EXTRA_ARGS=()
+}
+
+run_action() {
+  case "$ACTIVE_COMMAND" in
+    up|start|enable)
+      systemctl start "$SERVICE_NAME" || fail "$EXIT_START_FAILED" "start_failed" "failed to start tunnel service"
+      collect_state
+      emit_result "true" "$ACTIVE_COMMAND" "started" "tunnel service started"
+      ;;
+    down|stop|disable)
+      systemctl stop "$SERVICE_NAME" || fail "$EXIT_STOP_FAILED" "stop_failed" "failed to stop tunnel service"
+      collect_state
+      emit_result "true" "$ACTIVE_COMMAND" "stopped" "tunnel service stopped"
+      ;;
+    restart)
+      systemctl restart "$SERVICE_NAME" || fail "$EXIT_START_FAILED" "restart_failed" "failed to restart tunnel service"
+      collect_state
+      emit_result "true" "$ACTIVE_COMMAND" "restarted" "tunnel service restarted"
+      ;;
+    toggle)
+      if service_active; then
+        systemctl stop "$SERVICE_NAME" || fail "$EXIT_STOP_FAILED" "toggle_stop_failed" "failed to stop tunnel service"
+      else
+        systemctl start "$SERVICE_NAME" || fail "$EXIT_START_FAILED" "toggle_start_failed" "failed to start tunnel service"
+      fi
+      collect_state
+      emit_result "true" "$ACTIVE_COMMAND" "toggled" "tunnel service toggled"
+      ;;
+    status|status-json|json)
+      collect_state
+      emit_result "true" "$ACTIVE_COMMAND" "status" "tunnel status collected"
+      ;;
+    health)
+      collect_state
+      PUBLIC_IP_VALUE="$(public_ip)"
+      if [[ "$SERVICE_STATE" != "active" || "$TUNNEL_STATE" != "up" || "$ROUTE_STATE" != "on" ]]; then
+        emit_result "false" "$ACTIVE_COMMAND" "unhealthy" "tunnel is not fully active"
+        exit "$EXIT_STATUS_UNHEALTHY"
+      fi
+      emit_result "true" "$ACTIVE_COMMAND" "healthy" "tunnel is active"
+      ;;
+    public-ip)
+      collect_state
+      PUBLIC_IP_VALUE="$(public_ip)"
+      emit_result "true" "$ACTIVE_COMMAND" "public_ip" "public IP collected"
+      ;;
+    is-enabled)
+      collect_state
+      if [[ "$ENABLED_STATE" != "enabled" ]]; then
+        emit_result "false" "$ACTIVE_COMMAND" "not_enabled" "service is not enabled"
+        exit "$EXIT_NOT_ENABLED"
+      fi
+      emit_result "true" "$ACTIVE_COMMAND" "enabled" "service is enabled"
+      ;;
+    logs)
+      journalctl -u "$SERVICE_NAME" -n "${EXTRA_ARGS[0]:-100}" --no-pager
+      ;;
+    help)
+      cat <<'EOF'
+Usage: blockchain-vpn-tunnelctl [--json|--pretty] <command>
+  up|start|enable
+  down|stop|disable
+  restart
+  toggle
+  status
+  status-json|json
+  health
+  public-ip
+  is-enabled
+  logs [count]
+
+Exit codes:
+  0   success
+  2   usage error
+  10  must run as root
+  11  service not enabled
+  20  start/restart failed
+  21  stop failed
+  22  unhealthy status
+  23  another control operation is already running
+  30  dependency missing
+EOF
+      ;;
+    *)
+      fail "$EXIT_USAGE" "usage_error" "unknown command: $ACTIVE_COMMAND"
+      ;;
+  esac
+}
+
+main() {
+  parse_args "$@"
+  require_root
+  load_env
+  load_state
+  acquire_lock
+  if [[ "$ACTIVE_COMMAND" == "status-json" || "$ACTIVE_COMMAND" == "json" ]]; then
+    JSON_OUTPUT=1
+  fi
+  run_action
+}
+
+main "$@"

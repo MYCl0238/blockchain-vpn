@@ -1,0 +1,16 @@
+[Unit]
+Description=Blockchain VPN App Bridge Service
+After=network.target blockchain-vpn-target-client.service
+Wants=blockchain-vpn-target-client.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/default/blockchain-vpn-app-bridge
+ExecStart=/usr/local/bin/blockchain-vpn-app-bridge-service.py
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

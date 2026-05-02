@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -36,6 +38,7 @@ type worker struct {
 	mtu          int
 	tunFile      *os.File
 	udpConn      *net.UDPConn
+	serverRoute  []string
 }
 
 func main() {
@@ -61,22 +64,26 @@ func main() {
 }
 
 func (w *worker) run(ctx context.Context) error {
+	serverAddr, err := net.ResolveUDPAddr("udp", w.serverAddr)
+	if err != nil {
+		return err
+	}
+
 	if err := w.setupTun(); err != nil {
 		return fmt.Errorf("setup tun: %w", err)
 	}
 	defer w.cleanupTun()
 
 	if w.routeDefault {
+		if err := w.pinServerRoute(serverAddr); err != nil {
+			return fmt.Errorf("pin server route: %w", err)
+		}
 		if err := w.setupDefaultRoute(); err != nil {
 			return fmt.Errorf("setup default route: %w", err)
 		}
 	}
 
 	localAddr, err := net.ResolveUDPAddr("udp", w.localListen)
-	if err != nil {
-		return err
-	}
-	serverAddr, err := net.ResolveUDPAddr("udp", w.serverAddr)
 	if err != nil {
 		return err
 	}
@@ -141,6 +148,9 @@ func (w *worker) cleanupTun() {
 	if w.tunFile != nil {
 		_ = w.tunFile.Close()
 	}
+	if len(w.serverRoute) > 0 {
+		_ = run("ip", append([]string{"route", "del"}, w.serverRoute...)...)
+	}
 	_ = run("ip", "link", "del", w.tunName)
 }
 
@@ -149,6 +159,55 @@ func (w *worker) setupDefaultRoute() error {
 		return err
 	}
 	return nil
+}
+
+func (w *worker) pinServerRoute(serverAddr *net.UDPAddr) error {
+	if serverAddr == nil || serverAddr.IP == nil {
+		return fmt.Errorf("server address has no IP")
+	}
+
+	routeArgs, err := lookupRoute(serverAddr.IP.String())
+	if err != nil {
+		return err
+	}
+	w.serverRoute = append([]string{}, routeArgs...)
+	return run("ip", append([]string{"route", "replace"}, routeArgs...)...)
+}
+
+func lookupRoute(ip string) ([]string, error) {
+	c := exec.Command("ip", "route", "get", ip)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ip route get %s: %w: %s", ip, err, strings.TrimSpace(string(out)))
+	}
+
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("empty route lookup for %s", ip)
+	}
+
+	args := []string{ip + "/32"}
+	for i := 0; i < len(fields); i++ {
+		switch fields[i] {
+		case "via":
+			if i+1 >= len(fields) {
+				return nil, fmt.Errorf("route lookup missing gateway for %s", ip)
+			}
+			args = append(args, "via", fields[i+1])
+			i++
+		case "dev":
+			if i+1 >= len(fields) {
+				return nil, fmt.Errorf("route lookup missing device for %s", ip)
+			}
+			args = append(args, "dev", fields[i+1])
+			i++
+		}
+	}
+
+	if len(args) < 3 {
+		return nil, fmt.Errorf("could not parse route for %s from %q", ip, strings.TrimSpace(string(out)))
+	}
+	return args, nil
 }
 
 func (w *worker) loopUDPToTun(ctx context.Context) error {

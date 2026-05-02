@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRIDGE_DIR="${BVPN_APP_BRIDGE_DIR:-/var/lib/blockchain-vpn/bridge}"
+REQUEST_DIR="${BRIDGE_DIR}/requests"
+RESPONSE_DIR="${BRIDGE_DIR}/responses"
+STATUS_FILE="${BRIDGE_DIR}/status.json"
+TIMEOUT_SECS="${BVPN_APP_BRIDGE_TIMEOUT_SECS:-15}"
+POLL_SECS="${BVPN_APP_BRIDGE_POLL_SECS:-0.2}"
+
+command_name="${1:-status}"
+shift || true
+
+case "$command_name" in
+  up|down|toggle|restart|status|health|publicIp|public-ip|isEnabled|is-enabled)
+    ;;
+  logs)
+    ;;
+  *)
+    echo "{\"ok\":false,\"command\":\"$command_name\",\"code\":\"usage_error\",\"message\":\"unsupported bridge command: $command_name\"}" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$REQUEST_DIR" "$RESPONSE_DIR"
+
+request_id="$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex)
+PY
+)"
+
+request_file="${REQUEST_DIR}/${request_id}.json"
+response_file="${RESPONSE_DIR}/${request_id}.json"
+count="${1:-100}"
+
+python3 - "$request_file" "$request_id" "$command_name" "$count" <<'PY'
+import json, sys, time
+path, request_id, command, count = sys.argv[1:5]
+payload = {
+    "request_id": request_id,
+    "command": command,
+    "args": {"count": int(count)} if command == "logs" else {},
+    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+}
+with open(path + ".tmp", "w", encoding="utf-8") as fh:
+    json.dump(payload, fh)
+    fh.write("\n")
+import os
+os.replace(path + ".tmp", path)
+PY
+
+python3 - "$response_file" "$TIMEOUT_SECS" "$POLL_SECS" "$command_name" "$STATUS_FILE" <<'PY'
+import json, os, sys, time
+response_file, timeout_secs, poll_secs, command_name, status_file = sys.argv[1:6]
+deadline = time.monotonic() + float(timeout_secs)
+while time.monotonic() < deadline:
+    if os.path.exists(response_file):
+        with open(response_file, "r", encoding="utf-8") as fh:
+            data = fh.read()
+        print(data, end="" if data.endswith("\n") else "\n")
+        sys.exit(0)
+    time.sleep(float(poll_secs))
+
+fallback = {
+    "ok": False,
+    "command": command_name,
+    "code": "bridge_timeout",
+    "message": f"timed out waiting for response after {timeout_secs}s",
+}
+if os.path.exists(status_file):
+    try:
+        with open(status_file, "r", encoding="utf-8") as fh:
+            fallback["last_status"] = json.load(fh)
+    except Exception:
+        pass
+print(json.dumps(fallback))
+sys.exit(24)
+PY

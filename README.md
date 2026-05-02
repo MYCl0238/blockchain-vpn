@@ -1,49 +1,56 @@
 # blockchain-vpn
 
-## Repository Structure
+Custom VPN project with:
 
-- `backend/control-plane/` → server-side API + control-plane daemon
-- `protocol/udp/` → UDP + AEAD protocol implementation
-- `frontend/` → web dashboard (to be implemented)
-- `mobile/` → mobile client (to be implemented)
-- `deploy/systemd/server/` → server service units
-- `deploy/systemd/client/` → target client service units
-- `scripts/server/` → server-side helper scripts
-- `scripts/target-client/` → target client scripts (worker + tunnel)
-- `docs/` → interim report (`VPN_Interim_Report.docx`)
-- `data/` → runtime state (profiles, protocol sessions, events)
+- Node.js control plane on `backend/control-plane/`
+- custom UDP protocol daemon on `protocol/udp/cmd/server`
+- cross-platform protocol worker on `protocol/udp/cmd/worker`
+- custom full-tunnel server/client on `protocol/udp/cmd/tun-server` and `protocol/udp/cmd/tun-client`
+- Linux app bridge and React Native-facing control contract under `scripts/target-client/` and `docs/`
 
-## Running Services
+## Current project state
 
-### Server (user/systemd)
+Implemented now:
 
-- `deploy/systemd/server/blockchain-vpn-api.service` (port 8787)
-- `deploy/systemd/server/blockchain-vpnd.service` (UDP 7000)
+- control-plane API on port `8787`
+- custom UDP daemon on port `7000`
+- Linux full tunnel to `blockchain-vpn-tun-server` on port `7001`
+- Linux app bridge: unprivileged `blockchain-vpn-app-bridge` + root bridge service
+- Windows full-tunnel client implementation and PowerShell test controller
+- React Native package scaffold and shared command/result contract
 
-### Target client (root/systemd)
+Not implemented yet:
 
-- `deploy/systemd/client/blockchain-vpn-target-client.service`
-- Requires `/usr/local/bin/blockchain-vpn-client-tunnel`
+- integration of the encrypted `vpnd` session layer into the full TUN tunnel path
+- Android `VpnService` implementation
+- Windows service/native app bridge matching the Linux bridge model
+- actually testing in windows...
+- blockchain identity layer
 
-## New Backend APIs for protocol monitoring
+## Repository structure
 
-Authenticated endpoints (Bearer token):
+- `backend/control-plane/` control-plane daemon
+- `protocol/udp/` Go protocol and tunnel binaries
+- `deploy/systemd/server/` Linux server units
+- `deploy/systemd/client/` Linux client and bridge units
+- `scripts/server/` server deployment templates
+- `scripts/target-client/` Linux client control, bridge, and worker helpers
+- `scripts/windows/` Windows tunnel controller and config examples
+- `mobile/` React Native bridge scaffold
+- `docs/` bridge and integration docs
 
-- `POST /v1/proto/keepalive`
-- `POST /v1/proto/events`
-- `GET /v1/proto/sessions`
-- `GET /v1/proto/sessions/:id`
-- `GET /v1/proto/events?limit=100`
-- `GET /v1/proto/metrics`
+## Main binaries
 
-## Target client worker (mobile + PC)
+- `bin/blockchain-vpnd`
+- `bin/blockchain-vpn-target-worker`
+- `bin/blockchain-vpn-tun-server`
+- `bin/blockchain-vpn-tun-client`
+- `bin/blockchain-vpn-tun-client.exe`
 
-- Added `protocol/udp/cmd/worker` as persistent cross-platform client worker (no TUN/root requirement).
-- Launcher: `scripts/target-client/run-worker.sh`
-- Build output: `bin/blockchain-vpn-target-worker`
+## Main docs
 
-## Full tunnel workers (Linux)
-
-- Server worker: `protocol/udp/cmd/tun-server` -> `bin/blockchain-vpn-tun-server`
-- Client worker: `protocol/udp/cmd/tun-client` -> `bin/blockchain-vpn-tun-client`
-- Requirement: root + `/dev/net/tun` + iptables/nftables (NAT on server side)
+- `docs/README.md`
+- `docs/CLIENT_CONTROL_API.md`
+- `docs/BRIDGES.md`
+- `docs/REACT_NATIVE_INTEGRATION.md`
+- `docs/VPN_Interim_Report.docx`

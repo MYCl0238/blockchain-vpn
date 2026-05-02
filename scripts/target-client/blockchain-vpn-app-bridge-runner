@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRIDGE_BIN="${BVPN_APP_BRIDGE_TUNNELCTL:-/usr/local/bin/blockchain-vpn-tunnelctl}"
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo '{"ok":false,"command":"unknown","code":"must_run_as_root","message":"blockchain-vpn-app-bridge-runner must run as root"}' >&2
+  exit 10
+fi
+
+if [[ ! -x "$BRIDGE_BIN" ]]; then
+  echo "{\"ok\":false,\"command\":\"unknown\",\"code\":\"bridge_dependency_missing\",\"message\":\"tunnel control binary not found: $BRIDGE_BIN\"}" >&2
+  exit 30
+fi
+
+command_name="${1:-status}"
+shift || true
+
+map_command() {
+  case "$1" in
+    up|down|toggle|restart|status|health) echo "$1" ;;
+    publicIp|public-ip) echo "public-ip" ;;
+    isEnabled|is-enabled) echo "is-enabled" ;;
+    logs) echo "logs" ;;
+    *) return 1 ;;
+  esac
+}
+
+mapped_command="$(map_command "$command_name")" || {
+  echo "{\"ok\":false,\"command\":\"$command_name\",\"code\":\"usage_error\",\"message\":\"unsupported bridge command: $command_name\"}" >&2
+  exit 2
+}
+
+if [[ "$mapped_command" == "logs" ]]; then
+  count="${1:-100}"
+  exec "$BRIDGE_BIN" logs "$count"
+fi
+
+exec "$BRIDGE_BIN" --json "$mapped_command"

@@ -1,0 +1,22 @@
+[Unit]
+Description=Blockchain VPN Custom TUN Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/default/blockchain-vpn-tun-server
+ExecStart=/usr/local/bin/blockchain-vpn-tun-server \
+  --tun ${BVPN_TUN_SERVER_NAME} \
+  --tun-cidr ${BVPN_TUN_SERVER_CIDR} \
+  --listen ${BVPN_TUN_SERVER_LISTEN} \
+  --wan-if ${BVPN_TUN_SERVER_WAN_IF} \
+  --enable-nat=${BVPN_TUN_SERVER_ENABLE_NAT} \
+  --mtu ${BVPN_TUN_SERVER_MTU}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

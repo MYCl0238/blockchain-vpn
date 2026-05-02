@@ -5,10 +5,28 @@ ACTION="${1:-}"
 PROFILE_NAME="${BVPN_TUN_PROFILE:-blockchain-vpn-client}"
 WG_QUICK_BIN="${WG_QUICK_BIN:-/usr/bin/wg-quick}"
 OVPN_UNIT_PREFIX="${OVPN_UNIT_PREFIX:-openvpn-client@}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if [[ -n "${BVPN_TUN_CUSTOM_BIN:-}" ]]; then
+  CUSTOM_BIN="$BVPN_TUN_CUSTOM_BIN"
+elif [[ -x "$SCRIPT_DIR/blockchain-vpn-tun-client" ]]; then
+  CUSTOM_BIN="$SCRIPT_DIR/blockchain-vpn-tun-client"
+else
+  CUSTOM_BIN="$ROOT_DIR/bin/blockchain-vpn-tun-client"
+fi
+CUSTOM_PID_FILE="${BVPN_TUN_PID_FILE:-/run/blockchain-vpn-tun-client.pid}"
+CUSTOM_LOG_FILE="${BVPN_TUN_LOG_FILE:-/var/log/blockchain-vpn-tun-client.log}"
+CUSTOM_TUN_NAME="${BVPN_TUN_NAME:-bvpntun1}"
+CUSTOM_TUN_CIDR="${BVPN_TUN_CIDR:-10.99.0.2/24}"
+CUSTOM_SERVER="${BVPN_TUN_SERVER:-}"
+CUSTOM_BIND="${BVPN_TUN_BIND:-:0}"
+CUSTOM_ROUTE_DEFAULT="${BVPN_TUN_ROUTE_DEFAULT:-true}"
+CUSTOM_MTU="${BVPN_TUN_MTU:-1380}"
 
 # Preferred backend:
 #   BVPN_TUN_BACKEND=wireguard  -> wg-quick up/down <PROFILE_NAME>
 #   BVPN_TUN_BACKEND=openvpn    -> systemctl start/stop openvpn-client@<PROFILE_NAME>
+#   BVPN_TUN_BACKEND=custom     -> launch blockchain-vpn-tun-client
 # Defaults to wireguard when not specified.
 BACKEND="${BVPN_TUN_BACKEND:-wireguard}"
 
@@ -34,13 +52,78 @@ run_openvpn() {
   esac
 }
 
+custom_pid() {
+  if [[ -f "$CUSTOM_PID_FILE" ]]; then
+    cat "$CUSTOM_PID_FILE"
+  fi
+}
+
+custom_running() {
+  local pid
+  pid="$(custom_pid || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+run_custom() {
+  case "$1" in
+    start)
+      [[ -n "$CUSTOM_SERVER" ]] || { echo "BVPN_TUN_SERVER is required for custom backend" >&2; exit 1; }
+      [[ -x "$CUSTOM_BIN" ]] || { echo "custom tunnel binary not found/executable: $CUSTOM_BIN" >&2; exit 1; }
+      if custom_running; then
+        echo "custom tunnel already running with pid $(custom_pid)" >&2
+        exit 0
+      fi
+      mkdir -p "$(dirname "$CUSTOM_PID_FILE")" "$(dirname "$CUSTOM_LOG_FILE")"
+      local route_default_arg="false"
+      if [[ "$CUSTOM_ROUTE_DEFAULT" == "1" || "$CUSTOM_ROUTE_DEFAULT" == "true" || "$CUSTOM_ROUTE_DEFAULT" == "yes" ]]; then
+        route_default_arg="true"
+      fi
+      nohup "$CUSTOM_BIN" \
+        --tun "$CUSTOM_TUN_NAME" \
+        --tun-cidr "$CUSTOM_TUN_CIDR" \
+        --server "$CUSTOM_SERVER" \
+        --bind "$CUSTOM_BIND" \
+        --route-default="$route_default_arg" \
+        --mtu "$CUSTOM_MTU" \
+        >>"$CUSTOM_LOG_FILE" 2>&1 &
+      echo $! >"$CUSTOM_PID_FILE"
+      ;;
+    stop)
+      if ! custom_running; then
+        rm -f "$CUSTOM_PID_FILE"
+        exit 0
+      fi
+      kill "$(custom_pid)"
+      for _ in {1..20}; do
+        if ! custom_running; then
+          rm -f "$CUSTOM_PID_FILE"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "custom tunnel did not stop cleanly" >&2
+      exit 1
+      ;;
+    status)
+      if custom_running; then
+        echo "custom tunnel running with pid $(custom_pid)"
+      else
+        echo "custom tunnel not running"
+        exit 1
+      fi
+      ;;
+    *) echo "unsupported action for custom backend: $1" >&2; exit 1 ;;
+  esac
+}
+
 do_action() {
   local action="$1"
   case "$BACKEND" in
     wireguard) run_wireguard "$action" ;;
     openvpn) run_openvpn "$action" ;;
+    custom) run_custom "$action" ;;
     *)
-      echo "Unsupported BVPN_TUN_BACKEND: $BACKEND (expected: wireguard|openvpn)" >&2
+      echo "Unsupported BVPN_TUN_BACKEND: $BACKEND (expected: wireguard|openvpn|custom)" >&2
       exit 1
       ;;
   esac
@@ -58,11 +141,11 @@ case "$ACTION" in
     do_action start
     ;;
   status)
-    if [[ "$BACKEND" == "wireguard" ]]; then
-      wg show || true
-    else
-      systemctl status "${OVPN_UNIT_PREFIX}${PROFILE_NAME}" --no-pager || true
-    fi
+    case "$BACKEND" in
+      wireguard) wg show || true ;;
+      openvpn) systemctl status "${OVPN_UNIT_PREFIX}${PROFILE_NAME}" --no-pager || true ;;
+      custom) run_custom status ;;
+    esac
     ;;
   *)
     echo "Usage: $0 {start|stop|restart|status}" >&2
