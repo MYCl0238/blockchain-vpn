@@ -261,7 +261,7 @@ run_action() {
     health)
       collect_state
       PUBLIC_IP_VALUE="$(public_ip)"
-      if [[ "$SERVICE_STATE" != "active" || "$TUNNEL_STATE" != "up" || "$ROUTE_STATE" != "on" ]]; then
+      if [[ "$SERVICE_STATE" != "active" || "$TUNNEL_STATE" != "up" || "$ROUTE_STATE" != "on" || -z "$PUBLIC_IP_VALUE" ]]; then
         emit_result "false" "$ACTIVE_COMMAND" "unhealthy" "tunnel is not fully active"
         exit "$EXIT_STATUS_UNHEALTHY"
       fi

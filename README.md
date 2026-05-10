@@ -16,14 +16,15 @@ Implemented now:
 - custom UDP daemon on port `7000`
 - Linux full tunnel to `blockchain-vpn-tun-server` on port `7001`
 - Linux app bridge: unprivileged `blockchain-vpn-app-bridge` + root bridge service
-- Windows full-tunnel client implementation and PowerShell test controller
+- Windows full-tunnel client, SCM service supervisor, and PowerShell controller
 - React Native package scaffold and shared command/result contract
+- multi-peer custom tunnel routing on the server side for distinct client tunnel IPs
 
 Not implemented yet:
 
 - integration of the encrypted `vpnd` session layer into the full TUN tunnel path
 - Android `VpnService` implementation
-- Windows service/native app bridge matching the Linux bridge model
+- Windows app bridge matching the Linux bridge model
 - actually testing in windows...
 - blockchain identity layer
 
@@ -46,6 +47,7 @@ Not implemented yet:
 - `bin/blockchain-vpn-tun-server`
 - `bin/blockchain-vpn-tun-client`
 - `bin/blockchain-vpn-tun-client.exe`
+- `bin/blockchain-vpn-tun-service.exe`
 
 ## Main docs
 

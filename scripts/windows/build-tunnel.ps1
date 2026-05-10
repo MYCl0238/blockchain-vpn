@@ -9,6 +9,7 @@ try {
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
     go build -o (Join-Path $OutputDir "blockchain-vpn-tun-client.exe") .\cmd\tun-client
+    go build -o (Join-Path $OutputDir "blockchain-vpn-tun-service.exe") .\cmd\tun-service
 } finally {
     Remove-Item Env:GOOS -ErrorAction SilentlyContinue
     Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
@@ -16,3 +17,4 @@ try {
 }
 
 Write-Host "Built $OutputDir\blockchain-vpn-tun-client.exe"
+Write-Host "Built $OutputDir\blockchain-vpn-tun-service.exe"

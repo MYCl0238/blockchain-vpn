@@ -27,6 +27,10 @@ This directory contains Linux target-device helpers and the shared protocol work
 
 ## Linux full tunnel
 
+Each device must use a unique tunnel IP in `10.99.0.0/24`. The Linux examples
+use `10.99.0.2/24`; do not reuse that same client IP on Windows or another
+device.
+
 Main Linux service files:
 
 - `deploy/systemd/client/blockchain-vpn-target-client.service`

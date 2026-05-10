@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -37,9 +38,10 @@ type worker struct {
 	mtu       int
 	tunFile   *os.File
 	udpConn   *net.UDPConn
-	peer      *net.UDPAddr
 	peerMu    sync.RWMutex
+	peers     map[string]*net.UDPAddr
 	rules     []string
+	debugSeen int
 }
 
 func main() {
@@ -65,6 +67,8 @@ func main() {
 }
 
 func (w *worker) run(ctx context.Context) error {
+	w.peers = make(map[string]*net.UDPAddr)
+
 	if err := w.setupTun(); err != nil {
 		return fmt.Errorf("setup tun: %w", err)
 	}
@@ -106,17 +110,7 @@ func (w *worker) run(ctx context.Context) error {
 }
 
 func (w *worker) setupTun() error {
-	if err := run("ip", "tuntap", "add", "dev", w.tunName, "mode", "tun"); err != nil {
-		if !strings.Contains(err.Error(), "File exists") {
-			return err
-		}
-	}
-	if err := run("ip", "addr", "replace", w.tunCIDR, "dev", w.tunName); err != nil {
-		return err
-	}
-	if err := run("ip", "link", "set", "dev", w.tunName, "mtu", fmt.Sprint(w.mtu), "up"); err != nil {
-		return err
-	}
+	_ = run("ip", "link", "del", w.tunName)
 
 	f, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
@@ -134,6 +128,18 @@ func (w *worker) setupTun() error {
 	}
 
 	w.tunFile = f
+	if err := run("ip", "addr", "replace", w.tunCIDR, "dev", w.tunName); err != nil {
+		_ = f.Close()
+		w.tunFile = nil
+		_ = run("ip", "link", "del", w.tunName)
+		return err
+	}
+	if err := run("ip", "link", "set", "dev", w.tunName, "mtu", fmt.Sprint(w.mtu), "up"); err != nil {
+		_ = f.Close()
+		w.tunFile = nil
+		_ = run("ip", "link", "del", w.tunName)
+		return err
+	}
 	return nil
 }
 
@@ -186,16 +192,29 @@ func (w *worker) loopUDPToTun(ctx context.Context) error {
 			}
 			return err
 		}
-		w.peerMu.Lock()
-		w.peer = addr
-		w.peerMu.Unlock()
+		srcIP, _, err := packetEndpoints(buf[:n])
+		if err == nil && srcIP.IsValid() {
+			w.peerMu.Lock()
+			w.peers[srcIP.String()] = cloneUDPAddr(addr)
+			w.peerMu.Unlock()
+			if w.debugSeen < 20 {
+				log.Printf("udp->tun peer=%s src=%s len=%d", addr.String(), srcIP.String(), n)
+			}
+		} else if w.debugSeen < 20 {
+			log.Printf("udp->tun invalid-packet peer=%s len=%d err=%v", addr.String(), n, err)
+		}
 
 		if _, err := w.tunFile.Write(buf[:n]); err != nil {
 			if ctx.Err() != nil {
 				return context.Canceled
 			}
+			log.Printf("udp->tun write failed peer=%s len=%d err=%v", addr.String(), n, err)
 			return err
 		}
+		if w.debugSeen < 20 {
+			log.Printf("udp->tun write-ok peer=%s len=%d", addr.String(), n)
+		}
+		w.debugSeen++
 	}
 }
 
@@ -210,8 +229,13 @@ func (w *worker) loopTunToUDP(ctx context.Context) error {
 			return err
 		}
 
+		_, dstIP, err := packetEndpoints(buf[:n])
+		if err != nil {
+			continue
+		}
+
 		w.peerMu.RLock()
-		peer := w.peer
+		peer := w.peers[dstIP.String()]
 		w.peerMu.RUnlock()
 		if peer == nil {
 			continue
@@ -250,4 +274,54 @@ func networkCIDR(cidr string) string {
 	}
 	ipNet.IP = ip.Mask(ipNet.Mask)
 	return ipNet.String()
+}
+
+func packetEndpoints(packet []byte) (netip.Addr, netip.Addr, error) {
+	if len(packet) < 1 {
+		return netip.Addr{}, netip.Addr{}, fmt.Errorf("empty packet")
+	}
+
+	switch packet[0] >> 4 {
+	case 4:
+		if len(packet) < 20 {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("short ipv4 packet")
+		}
+		src, ok := netip.AddrFromSlice(packet[12:16])
+		if !ok {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("invalid ipv4 source")
+		}
+		dst, ok := netip.AddrFromSlice(packet[16:20])
+		if !ok {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("invalid ipv4 destination")
+		}
+		return src.Unmap(), dst.Unmap(), nil
+	case 6:
+		if len(packet) < 40 {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("short ipv6 packet")
+		}
+		src, ok := netip.AddrFromSlice(packet[8:24])
+		if !ok {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("invalid ipv6 source")
+		}
+		dst, ok := netip.AddrFromSlice(packet[24:40])
+		if !ok {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("invalid ipv6 destination")
+		}
+		return src, dst, nil
+	default:
+		return netip.Addr{}, netip.Addr{}, fmt.Errorf("unsupported ip version")
+	}
+}
+
+func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	if addr == nil {
+		return nil
+	}
+	ip := make(net.IP, len(addr.IP))
+	copy(ip, addr.IP)
+	return &net.UDPAddr{
+		IP:   ip,
+		Port: addr.Port,
+		Zone: addr.Zone,
+	}
 }

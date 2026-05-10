@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Blockchain VPN Proxy",
+  "version": "0.1.0",
+  "description": "Toggle browser proxy routing for blockchain-vpn.",
+  "permissions": [
+    "storage",
+    "proxy",
+    "webRequest",
+    "webRequestAuthProvider"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://84.21.171.106/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*",
+        "https://localhost/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Blockchain VPN Proxy",
+    "default_popup": "popup.html"
+  }
+}

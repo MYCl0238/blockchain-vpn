@@ -80,12 +80,12 @@ Linux uses:
 Windows uses:
 
 - `blockchain-vpn-windows-client.ps1` as the CLI controller
+- `blockchain-vpn-tun-service.exe` as the Windows SCM service
 - `blockchain-vpn-tun-client.exe` as the full-tunnel client
 
 Current limitations:
 
-- requires Administrator privileges
-- not yet wrapped as a Windows service
+- requires Administrator privileges for install/start/stop
 - not yet exposed through a dedicated app bridge daemon
 
 ## Android mapping

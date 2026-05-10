@@ -1,0 +1,71 @@
+body {
+  margin: 0;
+  font: 13px/1.4 system-ui, sans-serif;
+  background: #0b1320;
+  color: #e8eef7;
+  min-width: 320px;
+}
+
+.card {
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.muted {
+  margin: 0 0 12px;
+  color: #9db0c8;
+}
+
+label {
+  display: block;
+  margin-bottom: 10px;
+}
+
+label span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+input,
+select,
+button {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid #27415f;
+  background: #132235;
+  color: #e8eef7;
+  padding: 9px 10px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+button {
+  cursor: pointer;
+  background: #1c7ed6;
+  border-color: #1c7ed6;
+  font-weight: 600;
+}
+
+button:last-child {
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.status {
+  margin: 12px 0 0;
+  color: #a7f3d0;
+}
+
+.status.error {
+  color: #fca5a5;
+}

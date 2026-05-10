@@ -39,16 +39,17 @@ This lets the app trigger VPN actions without being root.
 
 ## Windows bridge
 
-Windows currently has a tunnel controller, but not the full bridge daemon model used on Linux.
+Windows now has a real tunnel service, but not the full app-facing bridge daemon model used on Linux.
 
 Implemented now:
 
 - Windows tunnel client in `protocol/udp/cmd/tun-client`
+- Windows SCM service supervisor in `protocol/udp/cmd/tun-service`
 - PowerShell controller in `scripts/windows/blockchain-vpn-windows-client.ps1`
 
 Missing still:
 
-- Windows background bridge/service for app integration
+- Windows background app bridge for React Native integration
 - a native adapter that hides Administrator/process details from React Native
 
 ## Android bridge

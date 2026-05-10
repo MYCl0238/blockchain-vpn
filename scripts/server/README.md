@@ -20,4 +20,9 @@ sudo install -m 0644 ../../deploy/systemd/server/blockchain-vpn-tun-server.servi
 sudo install -m 0644 ../../scripts/server/blockchain-vpn-tun-server.env.example /etc/default/blockchain-vpn-tun-server
 sudo systemctl daemon-reload
 sudo systemctl enable --now blockchain-vpn-tun-server.service
+sudo ufw allow 7001/udp
 ```
+
+If you use another firewall instead of UFW, allow inbound UDP on the tunnel
+listen port. Without that rule, client packets can reach the VPS NIC and still
+be dropped before `blockchain-vpn-tun-server` receives them.

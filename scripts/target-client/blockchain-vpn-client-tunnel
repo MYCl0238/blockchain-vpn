@@ -18,10 +18,16 @@ CUSTOM_PID_FILE="${BVPN_TUN_PID_FILE:-/run/blockchain-vpn-tun-client.pid}"
 CUSTOM_LOG_FILE="${BVPN_TUN_LOG_FILE:-/var/log/blockchain-vpn-tun-client.log}"
 CUSTOM_TUN_NAME="${BVPN_TUN_NAME:-bvpntun1}"
 CUSTOM_TUN_CIDR="${BVPN_TUN_CIDR:-10.99.0.2/24}"
+CUSTOM_TUN_GATEWAY="${BVPN_TUN_GATEWAY:-10.99.0.1}"
 CUSTOM_SERVER="${BVPN_TUN_SERVER:-}"
 CUSTOM_BIND="${BVPN_TUN_BIND:-:0}"
 CUSTOM_ROUTE_DEFAULT="${BVPN_TUN_ROUTE_DEFAULT:-true}"
 CUSTOM_MTU="${BVPN_TUN_MTU:-1380}"
+CUSTOM_API_URL="${BVPN_TUN_API_URL:-}"
+CUSTOM_API_TOKEN="${BVPN_TUN_API_TOKEN:-}"
+CUSTOM_AUTO_LEASE="${BVPN_TUN_AUTO_LEASE:-false}"
+CUSTOM_CLIENT_ID_FILE="${BVPN_TUN_CLIENT_ID_FILE:-/var/lib/blockchain-vpn/tunnel-client-id}"
+CUSTOM_CLIENT_ID="${BVPN_TUN_CLIENT_ID:-}"
 
 # Preferred backend:
 #   BVPN_TUN_BACKEND=wireguard  -> wg-quick up/down <PROFILE_NAME>
@@ -64,11 +70,83 @@ custom_running() {
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
 }
 
+load_client_id() {
+  if [[ -n "$CUSTOM_CLIENT_ID" ]]; then
+    printf '%s' "$CUSTOM_CLIENT_ID"
+    return 0
+  fi
+  if [[ -f "$CUSTOM_CLIENT_ID_FILE" ]]; then
+    cat "$CUSTOM_CLIENT_ID_FILE"
+    return 0
+  fi
+  return 1
+}
+
+save_client_id() {
+  local client_id="$1"
+  mkdir -p "$(dirname "$CUSTOM_CLIENT_ID_FILE")"
+  printf '%s\n' "$client_id" >"$CUSTOM_CLIENT_ID_FILE"
+}
+
+bool_true() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+request_tunnel_lease() {
+  [[ -n "$CUSTOM_API_URL" ]] || return 0
+  if ! bool_true "$CUSTOM_AUTO_LEASE"; then
+    return 0
+  fi
+
+  local client_id
+  client_id="$(load_client_id || true)"
+
+  local auth_args=()
+  if [[ -n "$CUSTOM_API_TOKEN" ]]; then
+    auth_args=(-H "Authorization: Bearer $CUSTOM_API_TOKEN")
+  fi
+
+  local payload response
+  payload="$(python3 - <<'PY' "$client_id"
+import json, os, socket, sys
+client_id = sys.argv[1] or None
+print(json.dumps({
+    "clientId": client_id,
+    "platform": "linux",
+    "deviceName": socket.gethostname(),
+}))
+PY
+)"
+  response="$(curl -fsS "${auth_args[@]}" -H 'Content-Type: application/json' -d "$payload" "${CUSTOM_API_URL%/}/v1/tunnel/lease")"
+
+  local parsed
+  parsed="$(python3 - <<'PY' "$response"
+import json, sys
+obj = json.loads(sys.argv[1])
+lease = obj.get("lease") or {}
+print(obj.get("clientId",""))
+print(lease.get("cidr",""))
+print(lease.get("gateway",""))
+PY
+)"
+  local leased_client_id leased_cidr leased_gateway
+  leased_client_id="$(printf '%s\n' "$parsed" | sed -n '1p')"
+  leased_cidr="$(printf '%s\n' "$parsed" | sed -n '2p')"
+  leased_gateway="$(printf '%s\n' "$parsed" | sed -n '3p')"
+  [[ -n "$leased_client_id" ]] && save_client_id "$leased_client_id"
+  [[ -n "$leased_cidr" ]] && CUSTOM_TUN_CIDR="$leased_cidr"
+  [[ -n "$leased_gateway" ]] && CUSTOM_TUN_GATEWAY="$leased_gateway"
+}
+
 run_custom() {
   case "$1" in
     start)
       [[ -n "$CUSTOM_SERVER" ]] || { echo "BVPN_TUN_SERVER is required for custom backend" >&2; exit 1; }
       [[ -x "$CUSTOM_BIN" ]] || { echo "custom tunnel binary not found/executable: $CUSTOM_BIN" >&2; exit 1; }
+      request_tunnel_lease
       if custom_running; then
         echo "custom tunnel already running with pid $(custom_pid)" >&2
         exit 0
@@ -87,6 +165,15 @@ run_custom() {
         --mtu "$CUSTOM_MTU" \
         >>"$CUSTOM_LOG_FILE" 2>&1 &
       echo $! >"$CUSTOM_PID_FILE"
+      for _ in {1..5}; do
+        if custom_running; then
+          return 0
+        fi
+        sleep 1
+      done
+      rm -f "$CUSTOM_PID_FILE"
+      echo "custom tunnel exited during startup; check $CUSTOM_LOG_FILE" >&2
+      exit 1
       ;;
     stop)
       if ! custom_running; then

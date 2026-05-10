@@ -46,10 +46,11 @@ Current implementation:
 
 - `scripts/windows/blockchain-vpn-windows-client.ps1`
 - `bin/blockchain-vpn-tun-client.exe`
+- `bin/blockchain-vpn-tun-service.exe`
 
 Current limitation:
 
-- this is a CLI controller, not yet a background app bridge/service
+- this is a service-backed CLI controller, not yet a dedicated app bridge daemon
 
 ### Android
 

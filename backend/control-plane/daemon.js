@@ -10,9 +10,15 @@ const PROFILES_PATH = path.join(DATA_DIR, 'profiles.json');
 const STATE_PATH = path.join(DATA_DIR, 'state.json');
 const PROTO_SESSIONS_PATH = path.join(DATA_DIR, 'proto_sessions.json');
 const PROTO_EVENTS_PATH = path.join(DATA_DIR, 'proto_events.ndjson');
+const TUNNEL_LEASES_PATH = path.join(DATA_DIR, 'tunnel_leases.json');
 
 const HOST = process.env.BVPN_HOST || process.env.VPND_HOST || '0.0.0.0';
 const PORT = Number(process.env.BVPN_PORT || process.env.VPND_PORT || 8787);
+const TUNNEL_SUBNET = process.env.BVPN_TUN_SUBNET || '10.99.0.0/24';
+const TUNNEL_GATEWAY = process.env.BVPN_TUN_GATEWAY || '10.99.0.1';
+const TUNNEL_PREFIX = Number(process.env.BVPN_TUN_PREFIX || 24);
+const TUNNEL_LEASE_START = Number(process.env.BVPN_TUN_LEASE_START || 2);
+const TUNNEL_LEASE_END = Number(process.env.BVPN_TUN_LEASE_END || 254);
 const TOKENS = (process.env.BVPN_TOKENS || process.env.BVPN_TOKEN || process.env.VPND_TOKENS || process.env.VPND_TOKEN || '')
   .split(',')
   .map((s) => s.trim())
@@ -23,6 +29,7 @@ if (!fs.existsSync(PROFILES_PATH)) fs.writeFileSync(PROFILES_PATH, '[]\n');
 if (!fs.existsSync(STATE_PATH)) fs.writeFileSync(STATE_PATH, JSON.stringify({ connected: false }, null, 2));
 if (!fs.existsSync(PROTO_SESSIONS_PATH)) fs.writeFileSync(PROTO_SESSIONS_PATH, '{}\n');
 if (!fs.existsSync(PROTO_EVENTS_PATH)) fs.writeFileSync(PROTO_EVENTS_PATH, '');
+if (!fs.existsSync(TUNNEL_LEASES_PATH)) fs.writeFileSync(TUNNEL_LEASES_PATH, '{}\n');
 
 let active = null;
 
@@ -152,6 +159,8 @@ function stopActive() {
 
 function readSessions() { return readJson(PROTO_SESSIONS_PATH, {}); }
 function writeSessions(obj) { writeJson(PROTO_SESSIONS_PATH, obj); }
+function readTunnelLeases() { return readJson(TUNNEL_LEASES_PATH, {}); }
+function writeTunnelLeases(obj) { writeJson(TUNNEL_LEASES_PATH, obj); }
 function appendEvent(evt) {
   fs.appendFileSync(PROTO_EVENTS_PATH, JSON.stringify(evt) + '\n');
 }
@@ -183,6 +192,111 @@ function protoMetrics() {
   };
 }
 
+function leaseIpHostPart(ip) {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip || '');
+  if (!m) return null;
+  return Number(m[4]);
+}
+
+function tunnelLeaseState() {
+  return {
+    subnet: TUNNEL_SUBNET,
+    gateway: TUNNEL_GATEWAY,
+    prefix: TUNNEL_PREFIX,
+    rangeStart: TUNNEL_LEASE_START,
+    rangeEnd: TUNNEL_LEASE_END,
+  };
+}
+
+function normalizeClientId(value) {
+  const v = String(value || '').trim();
+  return v || null;
+}
+
+function normalizeRequestedIp(value) {
+  const v = String(value || '').trim();
+  if (!v) return null;
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(v) ? v : null;
+}
+
+function allocateTunnelLease(body = {}) {
+  const leases = readTunnelLeases();
+  const clientId = normalizeClientId(body.clientId) || `c_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  const requestedIp = normalizeRequestedIp(body.requestedIp);
+  const now = nowIso();
+
+  if (leases[clientId]?.ip) {
+    const existing = leases[clientId];
+    existing.updatedAt = now;
+    existing.lastSeenAt = now;
+    existing.platform = body.platform || existing.platform || null;
+    existing.deviceName = body.deviceName || existing.deviceName || null;
+    writeTunnelLeases(leases);
+    return {
+      ok: true,
+      clientId,
+      lease: {
+        ip: existing.ip,
+        cidr: `${existing.ip}/${TUNNEL_PREFIX}`,
+        gateway: TUNNEL_GATEWAY,
+      },
+      state: tunnelLeaseState(),
+    };
+  }
+
+  const used = new Set(Object.values(leases).map((v) => v?.ip).filter(Boolean));
+  let allocatedIp = null;
+  if (requestedIp) {
+    const host = leaseIpHostPart(requestedIp);
+    if (host !== null && host >= TUNNEL_LEASE_START && host <= TUNNEL_LEASE_END && !used.has(requestedIp) && requestedIp !== TUNNEL_GATEWAY) {
+      allocatedIp = requestedIp;
+    }
+  }
+  if (!allocatedIp) {
+    const prefixParts = TUNNEL_GATEWAY.split('.');
+    if (prefixParts.length !== 4) throw new Error(`Invalid BVPN_TUN_GATEWAY: ${TUNNEL_GATEWAY}`);
+    const base = `${prefixParts[0]}.${prefixParts[1]}.${prefixParts[2]}.`;
+    for (let i = TUNNEL_LEASE_START; i <= TUNNEL_LEASE_END; i++) {
+      const candidate = `${base}${i}`;
+      if (candidate === TUNNEL_GATEWAY || used.has(candidate)) continue;
+      allocatedIp = candidate;
+      break;
+    }
+  }
+  if (!allocatedIp) throw new Error('No tunnel IP leases available');
+
+  leases[clientId] = {
+    clientId,
+    ip: allocatedIp,
+    platform: body.platform || null,
+    deviceName: body.deviceName || null,
+    createdAt: now,
+    updatedAt: now,
+    lastSeenAt: now,
+  };
+  writeTunnelLeases(leases);
+  return {
+    ok: true,
+    clientId,
+    lease: {
+      ip: allocatedIp,
+      cidr: `${allocatedIp}/${TUNNEL_PREFIX}`,
+      gateway: TUNNEL_GATEWAY,
+    },
+    state: tunnelLeaseState(),
+  };
+}
+
+function releaseTunnelLease(body = {}) {
+  const clientId = normalizeClientId(body.clientId);
+  if (!clientId) return { ok: false, removed: false };
+  const leases = readTunnelLeases();
+  if (!leases[clientId]) return { ok: true, removed: false };
+  delete leases[clientId];
+  writeTunnelLeases(leases);
+  return { ok: true, removed: true };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -191,6 +305,20 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && url.pathname === '/v1/status') return send(res, 200, status());
+
+    if (req.method === 'GET' && url.pathname === '/v1/tunnel/leases') {
+      return send(res, 200, { leases: readTunnelLeases(), state: tunnelLeaseState() });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/tunnel/lease') {
+      const body = await parseBody(req);
+      return send(res, 200, allocateTunnelLease(body));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/tunnel/release') {
+      const body = await parseBody(req);
+      return send(res, 200, releaseTunnelLease(body));
+    }
 
     if (req.method === 'GET' && url.pathname === '/v1/profiles') {
       return send(res, 200, { profiles: readJson(PROFILES_PATH, []) });

@@ -113,17 +113,7 @@ func (w *worker) run(ctx context.Context) error {
 }
 
 func (w *worker) setupTun() error {
-	if err := run("ip", "tuntap", "add", "dev", w.tunName, "mode", "tun"); err != nil {
-		if !strings.Contains(err.Error(), "File exists") {
-			return err
-		}
-	}
-	if err := run("ip", "addr", "replace", w.tunCIDR, "dev", w.tunName); err != nil {
-		return err
-	}
-	if err := run("ip", "link", "set", "dev", w.tunName, "mtu", fmt.Sprint(w.mtu), "up"); err != nil {
-		return err
-	}
+	_ = run("ip", "link", "del", w.tunName)
 
 	f, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
@@ -141,6 +131,18 @@ func (w *worker) setupTun() error {
 	}
 
 	w.tunFile = f
+	if err := run("ip", "addr", "replace", w.tunCIDR, "dev", w.tunName); err != nil {
+		_ = f.Close()
+		w.tunFile = nil
+		_ = run("ip", "link", "del", w.tunName)
+		return err
+	}
+	if err := run("ip", "link", "set", "dev", w.tunName, "mtu", fmt.Sprint(w.mtu), "up"); err != nil {
+		_ = f.Close()
+		w.tunFile = nil
+		_ = run("ip", "link", "del", w.tunName)
+		return err
+	}
 	return nil
 }
 

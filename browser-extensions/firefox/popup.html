@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blockchain VPN Proxy</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>Blockchain VPN Proxy</h1>
+      <p class="muted">Browser-only proxy control.</p>
+
+      <label>
+        <span>Proxy host</span>
+        <input id="host" type="text" />
+      </label>
+
+      <label>
+        <span>Proxy port</span>
+        <input id="port" type="number" min="1" max="65535" />
+      </label>
+
+      <label>
+        <span>Proxy type</span>
+        <select id="scheme">
+          <option value="http">HTTP</option>
+          <option value="https">HTTPS</option>
+          <option value="socks4">SOCKS4</option>
+          <option value="socks5">SOCKS5</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Username</span>
+        <input id="username" type="text" autocomplete="off" />
+      </label>
+
+      <label>
+        <span>Password</span>
+        <input id="password" type="password" autocomplete="off" />
+      </label>
+
+      <label>
+        <span>Bypass list</span>
+        <input id="bypassList" type="text" placeholder="localhost,127.0.0.1,[::1]" />
+      </label>
+
+      <div class="actions">
+        <button id="saveButton" type="button">Save</button>
+        <button id="toggleButton" type="button">Enable</button>
+      </div>
+
+      <p id="status" class="status">Loading…</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

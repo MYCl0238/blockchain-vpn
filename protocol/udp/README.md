@@ -7,6 +7,18 @@ This module contains two separate paths:
 
 They are not integrated into a single encrypted tunnel path yet.
 
+## Multi-device note
+
+The custom TUN path on UDP `7001` is now multi-peer on the server side, but
+each client still needs a unique tunnel IP inside `10.99.0.0/24`.
+
+Example allocation:
+
+- server: `10.99.0.1/24`
+- first Linux client: `10.99.0.2/24`
+- first Windows client: `10.99.0.3/24`
+- next client: `10.99.0.4/24`
+
 ## Build
 
 ```bash
@@ -47,6 +59,10 @@ sudo ../../bin/blockchain-vpn-tun-server \
   --listen :7001 \
   --wan-if eth0 \
   --enable-nat=true
+
+# Also allow inbound UDP on the listen port in the VPS firewall.
+# Example with UFW:
+sudo ufw allow 7001/udp
 ```
 
 Linux client:
@@ -62,5 +78,5 @@ sudo ../../bin/blockchain-vpn-tun-client \
 Windows client:
 
 ```powershell
-.\bin\blockchain-vpn-tun-client.exe --tun bvpntun1 --tun-cidr 10.99.0.2/24 --tun-gateway 10.99.0.1 --server SERVER_IP:7001 --route-default=true
+.\bin\blockchain-vpn-tun-client.exe --tun bvpntun1 --tun-cidr 10.99.0.3/24 --tun-gateway 10.99.0.1 --server SERVER_IP:7001 --route-default=true
 ```
