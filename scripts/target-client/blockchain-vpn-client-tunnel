@@ -25,7 +25,11 @@ CUSTOM_ROUTE_DEFAULT="${BVPN_TUN_ROUTE_DEFAULT:-true}"
 CUSTOM_MTU="${BVPN_TUN_MTU:-1380}"
 CUSTOM_API_URL="${BVPN_TUN_API_URL:-}"
 CUSTOM_API_TOKEN="${BVPN_TUN_API_TOKEN:-}"
-CUSTOM_AUTO_LEASE="${BVPN_TUN_AUTO_LEASE:-false}"
+# Default ON: without a per-device tunnel lease, two clients sharing the same
+# hard-coded BVPN_TUN_CIDR both source-IP-collide on the server, and the server's
+# peer map flip-flops between them so only the most recent TX'er gets return
+# traffic. Override to false only for single-device labs.
+CUSTOM_AUTO_LEASE="${BVPN_TUN_AUTO_LEASE:-true}"
 CUSTOM_CLIENT_ID_FILE="${BVPN_TUN_CLIENT_ID_FILE:-/var/lib/blockchain-vpn/tunnel-client-id}"
 CUSTOM_CLIENT_ID="${BVPN_TUN_CLIENT_ID:-}"
 
@@ -96,9 +100,12 @@ bool_true() {
 }
 
 request_tunnel_lease() {
-  [[ -n "$CUSTOM_API_URL" ]] || return 0
   if ! bool_true "$CUSTOM_AUTO_LEASE"; then
     return 0
+  fi
+  if [[ -z "$CUSTOM_API_URL" ]]; then
+    echo "blockchain-vpn-client-tunnel: BVPN_TUN_AUTO_LEASE=true requires BVPN_TUN_API_URL (control-plane URL). Set it to e.g. https://<server>/vpn-api or http://<server>:8787, or disable AUTO_LEASE." >&2
+    exit 1
   fi
 
   local client_id

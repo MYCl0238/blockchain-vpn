@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kullanici Profili</title>
+    <%- include('partials/icons') %>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/profile.css" />
+    <style></style>
+  </head>
+  <body>
+    <div class="bg-orb"></div>
+    <div class="bg-orb"></div>
+
+    <div class="profile-card">
+      <h2>Profil Detaylari</h2>
+
+      <div class="info-box">
+        <div class="info-label">Kullanici ID (Baglanti Anahtari)</div>
+        <div class="info-value"><%= user.id %></div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-label">Kayitli E-Posta</div>
+       
+        <form action="/api/auth/profile/email" method="POST" class="email-update-form">
+          <input
+            type="email"
+            name="email"
+            class="email-input"
+            placeholder="E-posta adresiniz"
+            value="<%= user.recovery_email || '' %>"
+          />
+          <button type="submit" class="email-save-btn">Kaydet</button>
+        </form>
+        <% if (typeof profileError !== 'undefined' && profileError) { %>
+          <div class="profile-message profile-message-error"><%= profileError %></div>
+        <% } %>
+        <% if (typeof profileSuccess !== 'undefined' && profileSuccess) { %>
+          <div class="profile-message profile-message-success"><%= profileSuccess %></div>
+        <% } %>
+      </div>
+
+      <div class="info-box">
+        <div class="info-label" style="text-align: center">Cihazlar</div>
+        <!-- Onceki degisiklik: Cihazlar tablo olarak listelenir ve silme islemi form ile backend'e gider. -->
+        <div class="devices-table-wrap">
+          <table class="devices-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Cihaz</th>
+                <th>Token</th>
+                <th>Durum</th>
+                <th>Son Gorulme</th>
+                <th>Islem</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% if (!devices || devices.length === 0) { %>
+                <tr>
+                  <td colspan="6" class="empty-devices">Kayitli cihaz yok</td>
+                </tr>
+              <% } %>
+
+              <% for( let index = 0; index < devices.length; index++ ) { %>
+                <% const isCurrentDevice = devices[index].device_token === currentDeviceToken; %>
+                <% const isActive = isCurrentDevice || devices[index].last_active === null; %>
+                <tr>
+                  <td><%= devices[index].id %></td>
+                  <td><%= devices[index].device_type %></td>
+                  <td class="device-token"><%= devices[index].device_token %></td>
+                  <td>
+                    <span class="status-badge <%= isActive ? 'status-active' : 'status-passive' %>">
+                      <%= isActive ? "Aktif" : "Pasif" %>
+                    </span>
+                  </td>
+                  <td>
+                    <%= isActive ? "-" : new Date(devices[index].last_active).toLocaleString("tr-TR") %>
+                  </td>
+                  <td>
+                    <form method="POST" action="/api/auth/devices/delete" class="delete-device-form">
+                      <input type="hidden" name="deviceToken" value="<%= devices[index].device_token %>" />
+                      <button type="submit" class="delete-device-btn">Sil</button>
+                    </form>
+                  </td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <a href="/dashboard" class="btn btn-modern">Dashboard'a Don</a>
+    </div>
+  </body>
+</html>

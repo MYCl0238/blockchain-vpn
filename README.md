@@ -1,58 +1,83 @@
 # blockchain-vpn
 
-Custom VPN project with:
+End-to-end VPN stack: custom UDP tunnel, a control-plane to manage it,
+and clients for Linux, Android, Windows, and the browser.
 
-- Node.js control plane on `backend/control-plane/`
-- custom UDP protocol daemon on `protocol/udp/cmd/server`
-- cross-platform protocol worker on `protocol/udp/cmd/worker`
-- custom full-tunnel server/client on `protocol/udp/cmd/tun-server` and `protocol/udp/cmd/tun-client`
-- Linux app bridge and React Native-facing control contract under `scripts/target-client/` and `docs/`
+## What's in here
 
-## Current project state
+```
+backend/control-plane/   Node.js control-plane (UDP tunnel + lease orchestration)
+protocol/udp/            Go protocol: tun-server, tun-client, app-bridge, worker
+deploy/systemd/          Linux systemd units (server + client + bridge)
+scripts/server/          Server install templates
+scripts/target-client/   Linux client install + helpers
+scripts/windows/         Windows tunnel controller + service configs
+mobile/                  Native Expo Module (Android VpnService bridge)
+apps/cross-platform-app/ Expo app — Android + Linux desktop (via Tauri)
+webui/                   Express user-management + dashboard (formerly vpn_project)
+browser-extensions/      Browser extension that pairs with the webui
+frontend/                Legacy frontend bits (kept for reference)
+docs/                    Architecture + integration docs + per-OS install guides
+```
 
-Implemented now:
+## Clients, at a glance
 
-- control-plane API on port `8787`
-- custom UDP daemon on port `7000`
-- Linux full tunnel to `blockchain-vpn-tun-server` on port `7001`
-- Linux app bridge: unprivileged `blockchain-vpn-app-bridge` + root bridge service
-- Windows full-tunnel client, SCM service supervisor, and PowerShell controller
-- React Native package scaffold and shared command/result contract
-- multi-peer custom tunnel routing on the server side for distinct client tunnel IPs
+| Client                | Status      | How it tunnels                                                                           |
+| --------------------- | ----------- | ---------------------------------------------------------------------------------------- |
+| Linux desktop (Tauri) | working     | Local control-plane daemon (`:8787`) spawns `blockchain-vpn-tun-client` with CAP_NET_ADMIN |
+| Android (Expo)        | working     | Native Expo Module wrapping `android.net.VpnService`, talks to cloud control-plane        |
+| Windows               | partial     | SCM service + unprivileged CLI; tunnel comes up, TCP from inside VM is deferred           |
+| Browser extension     | working     | Pairs with the webui to push squid proxy credentials                                      |
 
-Not implemented yet:
+See [docs/INSTALL_LINUX.md](docs/INSTALL_LINUX.md),
+[docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md), and
+[docs/INSTALL_ANDROID.md](docs/INSTALL_ANDROID.md) for end-user installs.
+Built artifacts are published on the
+[GitHub Releases page](https://github.com/MYCl0238/blockchain-vpn/releases).
 
-- integration of the encrypted `vpnd` session layer into the full TUN tunnel path
-- Android `VpnService` implementation
-- Windows app bridge matching the Linux bridge model
-- actually testing in windows...
-- blockchain identity layer
+## Production VPS layout
 
-## Repository structure
+What runs on the server (Ubuntu 24.04):
 
-- `backend/control-plane/` control-plane daemon
-- `protocol/udp/` Go protocol and tunnel binaries
-- `deploy/systemd/server/` Linux server units
-- `deploy/systemd/client/` Linux client and bridge units
-- `scripts/server/` server deployment templates
-- `scripts/target-client/` Linux client control, bridge, and worker helpers
-- `scripts/windows/` Windows tunnel controller and config examples
-- `mobile/` React Native bridge scaffold
-- `docs/` bridge and integration docs
+- **nginx** — fronts the webui and reverse-proxies `/vpn-api/` to the control-plane
+- **`blockchain-vpn-tun-server`** — UDP `:443`, the actual tunnel terminator
+- **control-plane** — `:8787` (loopback), spawns/manages tun-server peers and leases
+- **webui** (`vpn-project.service`) — Express on `:3000`, behind nginx
+- **postgres** — user store for the webui
 
-## Main binaries
+Last verified 2026-05-13.
+
+## Backend pieces
+
+- control-plane API on port `8787` (and nginx-proxied at `/vpn-api/` on the public VPS)
+- custom UDP daemon on port `7000` (legacy worker channel)
+- Full tunnel to `blockchain-vpn-tun-server` on UDP `:443`
+- Per-device tunnel-lease allocation hooked into the webui (device_token → control-plane clientId)
+- Multi-peer custom tunnel routing on the server side for distinct client tunnel IPs
+
+## Binaries (built into `bin/`)
 
 - `bin/blockchain-vpnd`
 - `bin/blockchain-vpn-target-worker`
 - `bin/blockchain-vpn-tun-server`
-- `bin/blockchain-vpn-tun-client`
-- `bin/blockchain-vpn-tun-client.exe`
+- `bin/blockchain-vpn-tun-client` (+ `.exe`)
 - `bin/blockchain-vpn-tun-service.exe`
+- `bin/blockchain-vpn-app-bridge` (+ `.exe`)
+- `bin/blockchain-vpn-app-bridge-service.exe`
 
-## Main docs
+Build with `bash scripts/build.sh` (or build per-binary under `protocol/udp/cmd/`).
 
-- `docs/README.md`
-- `docs/CLIENT_CONTROL_API.md`
-- `docs/BRIDGES.md`
-- `docs/REACT_NATIVE_INTEGRATION.md`
-- `docs/VPN_Interim_Report.docx`
+## Docs
+
+- [docs/INSTALL_LINUX.md](docs/INSTALL_LINUX.md) — Linux desktop install
+- [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md) — Windows desktop install
+- [docs/INSTALL_ANDROID.md](docs/INSTALL_ANDROID.md) — Android install
+- [docs/CLIENT_CONTROL_API.md](docs/CLIENT_CONTROL_API.md) — control-plane HTTP API
+- [docs/BRIDGES.md](docs/BRIDGES.md) — app-bridge protocol (Linux + Windows)
+- [docs/REACT_NATIVE_INTEGRATION.md](docs/REACT_NATIVE_INTEGRATION.md) — Expo Module integration
+
+## Not done
+
+- Encrypted `vpnd` session layer integrated into the full TUN path
+- Windows TCP-from-VM connectivity (tunnel up, packets flow, TCP handshake stalls)
+- Blockchain identity layer

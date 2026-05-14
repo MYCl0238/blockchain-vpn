@@ -194,11 +194,20 @@ func (w *worker) loopUDPToTun(ctx context.Context) error {
 		}
 		srcIP, _, err := packetEndpoints(buf[:n])
 		if err == nil && srcIP.IsValid() {
+			key := srcIP.String()
 			w.peerMu.Lock()
-			w.peers[srcIP.String()] = cloneUDPAddr(addr)
+			existing := w.peers[key]
+			if existing != nil && existing.String() != addr.String() {
+				// Two different UDP peers claim the same tunnel source IP.
+				// Without a lease, the second client overwrites the first and
+				// only one direction gets return traffic. Log loudly so the
+				// operator can re-check BVPN_TUN_AUTO_LEASE / client_id setup.
+				log.Printf("WARN: tunnel IP %s rebound: %s -> %s (multi-device collision; ensure each client has a unique lease)", key, existing.String(), addr.String())
+			}
+			w.peers[key] = cloneUDPAddr(addr)
 			w.peerMu.Unlock()
 			if w.debugSeen < 20 {
-				log.Printf("udp->tun peer=%s src=%s len=%d", addr.String(), srcIP.String(), n)
+				log.Printf("udp->tun peer=%s src=%s len=%d", addr.String(), key, n)
 			}
 		} else if w.debugSeen < 20 {
 			log.Printf("udp->tun invalid-packet peer=%s len=%d err=%v", addr.String(), n, err)

@@ -1,0 +1,129 @@
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: "Inter", sans-serif;
+  background: #0f172a;
+  overflow: hidden;
+  color: white;
+}
+
+/* background glow */
+.bg {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(
+    circle,
+    rgba(99, 102, 241, 0.25),
+    transparent 70%
+  );
+  filter: blur(70px);
+  animation: move 12s infinite alternate ease-in-out;
+}
+
+.bg:nth-child(2) {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.25),
+    transparent 70%
+  );
+  left: 60%;
+  top: 40%;
+  animation-duration: 14s;
+}
+
+@keyframes move {
+  from {
+    transform: translate(-50px, -50px);
+  }
+  to {
+    transform: translate(80px, 60px);
+  }
+}
+
+.card-modern {
+  position: relative;
+  width: 400px;
+  padding: 3rem 2.5rem;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+  text-align: center;
+}
+
+h2 {
+  margin-bottom: 25px;
+  font-weight: 700;
+}
+
+/* input */
+.form-control {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: white;
+  border-radius: 12px;
+  padding: 14px;
+  transition: all 0.25s ease;
+}
+
+.form-control::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.form-control:focus {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #6366f1;
+  /* Onceki degisiklik: Input fokus olunca altta/dekorasyonda cikan vurgu kaldirildi. */
+  box-shadow: none;
+  color: white;
+  outline: none;
+  text-decoration: none;
+}
+
+/* button */
+.btn-modern {
+  border-radius: 14px;
+  padding: 12px;
+  font-weight: 600;
+  margin-top: 10px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none;
+  color: white;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-modern:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.5);
+}
+
+.btn-modern::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 50%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: skewX(-25deg);
+}
+
+.btn-modern:hover::after {
+  animation: shine 0.8s;
+}
+
+@keyframes shine {
+  from {
+    left: -120%;
+  }
+  to {
+    left: 130%;
+  }
+}

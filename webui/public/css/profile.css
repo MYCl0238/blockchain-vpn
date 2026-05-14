@@ -1,0 +1,304 @@
+html,
+body {
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: "Inter", sans-serif;
+  background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+  color: #333;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.bg-orb {
+  position: fixed;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(
+    circle,
+    rgba(143, 148, 251, 0.4),
+    transparent 70%
+  );
+  filter: blur(60px);
+  animation: float 10s infinite alternate ease-in-out;
+  z-index: 1;
+  pointer-events: none;
+}
+.bg-orb:nth-child(2) {
+  background: radial-gradient(
+    circle,
+    rgba(255, 195, 160, 0.4),
+    transparent 70%
+  );
+  right: -100px;
+  top: -100px;
+  animation-duration: 12s;
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0px) translateX(0px);
+  }
+  100% {
+    transform: translateY(40px) translateX(-40px);
+  }
+}
+
+/* Onceki degisiklik: Profil karti genisletildi ve cihaz tablosuna uygun hale getirildi. */
+.profile-card {
+  position: relative;
+  z-index: 2;
+  width: min(920px, 100%);
+  max-height: calc(100dvh - 32px);
+  padding: 2rem 2rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05);
+  text-align: center;
+  transition: transform 0.3s ease;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-card:hover {
+  transform: translateY(-5px);
+}
+
+h2 {
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #1f2937;
+  letter-spacing: -0.5px;
+  flex: 0 0 auto;
+}
+
+.info-box {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
+  text-align: left;
+  flex: 0 0 auto;
+}
+
+.info-box:last-of-type {
+  min-height: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Onceki degisiklik: Cihaz listesi tabloya alindi; sayfa degil tablo alani kayar. */
+.devices-table-wrap {
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.devices-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  color: #111827;
+}
+
+.devices-table th,
+.devices-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.devices-table th {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.device-token {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-passive {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.delete-device-form {
+  margin: 0;
+}
+
+.delete-device-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #ef4444;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.delete-device-btn:hover {
+  background: #dc2626;
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.25);
+  transform: translateY(-1px);
+}
+
+.empty-devices {
+  color: #6b7280;
+  text-align: center !important;
+}
+
+.info-label {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.info-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: 2px;
+}
+
+/* Onceki degisiklik: Kullanici panelindeki e-posta alani duzenlenebilir yapildi. */
+.email-update-form {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.email-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: #111827;
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.email-input:focus {
+  border-color: #6366f1;
+  box-shadow: none;
+  outline: none;
+  text-decoration: none;
+}
+
+.email-save-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 0 16px;
+  background: #111827;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-message {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profile-message-error {
+  color: #dc2626;
+}
+
+.profile-message-success {
+  color: #166534;
+}
+
+.btn-modern {
+  border-radius: 14px;
+  padding: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none;
+  color: white;
+  transition: all 0.3s ease;
+  width: 100%;
+  text-decoration: none;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.btn-modern:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+  color: white;
+}
+
+@media (max-width: 560px) {
+  body {
+    padding: 10px;
+  }
+
+  .profile-card {
+    max-height: calc(100dvh - 20px);
+    padding: 1rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    margin-bottom: 12px;
+  }
+
+  .email-update-form {
+    flex-direction: column;
+  }
+
+  .email-save-btn {
+    min-height: 44px;
+  }
+}

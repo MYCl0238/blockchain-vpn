@@ -76,7 +76,8 @@ function Update-ConfigValue([string]$Key, [string]$Value) {
     }
     $replaced = $false
     $next = foreach ($item in $existing) {
-        if ($item -match "^\s*\$env:$([regex]::Escape($Key))\s*=") {
+        $pattern = '^\s*\$env:' + [regex]::Escape($Key) + '\s*='
+        if ($item -match $pattern) {
             $replaced = $true
             $line
         } else {

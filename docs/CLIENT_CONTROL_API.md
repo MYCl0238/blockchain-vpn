@@ -27,8 +27,19 @@ blockchain-vpn-app-bridge <command>
 Windows exposes the same shape through:
 
 ```powershell
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" <command>
+```
+
+Internally this writes a request into the bridge spool that
+`blockchain-vpn-app-bridge-service.exe` (running as SYSTEM) drains and
+dispatches to:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 <command> -Json
 ```
+
+The PowerShell controller is still the source of truth for SCM operations;
+the bridge layer just makes the same commands callable without elevation.
 
 ## Result shape
 
@@ -79,14 +90,11 @@ Linux uses:
 
 Windows uses:
 
-- `blockchain-vpn-windows-client.ps1` as the CLI controller
+- `blockchain-vpn-app-bridge.exe` as the unprivileged entrypoint
+- `blockchain-vpn-app-bridge-service.exe` as the SYSTEM bridge daemon
+- `blockchain-vpn-windows-client.ps1` as the SCM controller
 - `blockchain-vpn-tun-service.exe` as the Windows SCM service
 - `blockchain-vpn-tun-client.exe` as the full-tunnel client
-
-Current limitations:
-
-- requires Administrator privileges for install/start/stop
-- not yet exposed through a dedicated app bridge daemon
 
 ## Android mapping
 

@@ -39,18 +39,27 @@ This lets the app trigger VPN actions without being root.
 
 ## Windows bridge
 
-Windows now has a real tunnel service, but not the full app-facing bridge daemon model used on Linux.
+Windows now mirrors the Linux file-spool model.
 
-Implemented now:
+Components:
 
-- Windows tunnel client in `protocol/udp/cmd/tun-client`
-- Windows SCM service supervisor in `protocol/udp/cmd/tun-service`
-- PowerShell controller in `scripts/windows/blockchain-vpn-windows-client.ps1`
+- `protocol/udp/cmd/tun-client` — full-tunnel UDP client.
+- `protocol/udp/cmd/tun-service` — SCM service that supervises tun-client.
+- `protocol/udp/cmd/app-bridge` — unprivileged CLI; what the UI/native module calls.
+- `protocol/udp/cmd/app-bridge-service` — SYSTEM Windows Service that drains the spool and dispatches commands through the PowerShell controller.
+- `scripts/windows/blockchain-vpn-windows-client.ps1` — PowerShell controller; called by the bridge service to translate JSON commands into SCM operations.
 
-Missing still:
+Flow:
 
-- Windows background app bridge for React Native integration
-- a native adapter that hides Administrator/process details from React Native
+1. App or native helper calls `blockchain-vpn-app-bridge.exe <command>`.
+2. The client writes a JSON request into `%ProgramData%\BlockchainVpn\bridge\requests`.
+3. The SYSTEM bridge service detects the request.
+4. The bridge service runs `powershell.exe ... blockchain-vpn-windows-client.ps1 <command> -Json`.
+5. The PowerShell controller talks to the tunnel SCM service.
+6. The bridge service writes the JSON response into `%ProgramData%\BlockchainVpn\bridge\responses`.
+7. The client reads and returns that JSON.
+
+Like the Linux side, this lets unprivileged UI code trigger Administrator-only VPN actions without prompting the user for elevation per command. ACLs on the spool grant `BUILTIN\Users` modify rights so any logged-in user can post requests.
 
 ## Android bridge
 

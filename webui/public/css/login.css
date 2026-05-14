@@ -1,0 +1,144 @@
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: "Inter", sans-serif;
+  background: #0f172a;
+  overflow: hidden;
+  color: white;
+}
+
+.bg {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(
+    circle,
+    rgba(99, 102, 241, 0.25),
+    transparent 70%
+  );
+  filter: blur(70px);
+  animation: move 12s infinite alternate ease-in-out;
+}
+
+.bg:nth-child(2) {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.25),
+    transparent 70%
+  );
+  left: 60%;
+  top: 40%;
+  animation-duration: 14s;
+}
+
+@keyframes move {
+  from {
+    transform: translate(-50px, -50px);
+  }
+  to {
+    transform: translate(80px, 60px);
+  }
+}
+
+.card-modern {
+  position: relative;
+  width: 460px;
+  padding: 3rem 2.5rem;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+  text-align: center;
+}
+
+h2 {
+  margin-bottom: 30px;
+  font-weight: 700;
+}
+
+.key-input {
+  text-align: center;
+  letter-spacing: 3px;
+  font-weight: 700;
+  text-transform: uppercase;
+  width: 90px !important;
+  height: 65px;
+  font-size: 1.6rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: white;
+  transition: all 0.25s ease;
+}
+
+.key-input:focus {
+  border-color: #8b5cf6;
+  box-shadow:
+    0 0 0 2px rgba(139, 92, 246, 0.4),
+    0 0 15px rgba(139, 92, 246, 0.4);
+  transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+  /* Onceki degisiklik: Fokus halinde input alt dekorasyonu kapatildi. */
+  text-decoration: none;
+}
+
+.dash {
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: bold;
+}
+
+/* BUTTON */
+.btn-modern {
+  border-radius: 14px;
+  padding: 12px;
+  font-weight: 600;
+  margin-top: 10px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none;
+  color: white;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-modern:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.5);
+}
+
+.btn-modern::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 50%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: skewX(-25deg);
+}
+
+.btn-modern:hover::after {
+  animation: shine 0.8s;
+}
+
+@keyframes shine {
+  from {
+    left: -120%;
+  }
+  to {
+    left: 130%;
+  }
+}
+
+@media (max-width: 500px) {
+  .key-input {
+    width: 60px !important;
+    height: 55px;
+    font-size: 1.3rem;
+  }
+}

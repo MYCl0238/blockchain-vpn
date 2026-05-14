@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +32,8 @@ type worker struct {
 	mtu             int
 	tunDev          tun.Device
 	udpConn         *net.UDPConn
+	tunPrefix       netip.Prefix
+	tunAddr         netip.Addr
 	serverRouteLUID *winipcfg.LUID
 	serverRouteDest netip.Prefix
 	serverRouteNext netip.Addr
@@ -111,6 +115,8 @@ func (w *worker) setupTun(serverAddr *net.UDPAddr) error {
 	if err != nil {
 		return err
 	}
+	w.tunPrefix = tunPrefix.Masked()
+	w.tunAddr = tunPrefix.Addr()
 	tunGateway, err := netip.ParseAddr(w.tunGateway)
 	if err != nil {
 		return err
@@ -127,8 +133,18 @@ func (w *worker) setupTun(serverAddr *net.UDPAddr) error {
 	ipif.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
 	ipif.DadTransmits = 0
 	ipif.UseAutomaticMetric = false
-	ipif.Metric = 0
+	ipif.Metric = 1
 	ipif.NLMTU = uint32(w.mtu)
+	// Wintun adapters default to strong-host send, which makes Windows refuse
+	// to route traffic out bvpntun1 unless the socket was already bound to
+	// 10.99.0.x. Sockets normally bind to the LAN IP (192.168.x.y), so the
+	// default route via bvpntun1 silently falls back to the LAN default
+	// route, and the VPN is bypassed. Enable weak-host *send* only — keeping
+	// receive on strong-host stops Windows from replying to LAN/SSH packets
+	// via the tunnel, which would leak non-tunnel source IPs to the server.
+	// Stray packets that still slip through are filtered in loopTunToUDP.
+	ipif.WeakHostSend = true
+	ipif.WeakHostReceive = false
 	if w.routeDefault {
 		ipif.DisableDefaultRoutes = false
 	}
@@ -140,13 +156,33 @@ func (w *worker) setupTun(serverAddr *net.UDPAddr) error {
 		if err := w.pinServerRoute(serverAddr); err != nil {
 			return err
 		}
-		if err := luid.SetRoutesForFamily(windows.AF_INET, []*winipcfg.RouteData{{
+		// SetRoutesForFamily can race with the IP stack finishing the
+		// interface bring-up (ERROR_NOT_FOUND / "Eleman bulunamadı") on
+		// Windows 11. Retry a handful of times with short backoff.
+		routes := []*winipcfg.RouteData{{
 			Destination: netip.PrefixFrom(netip.IPv4Unspecified(), 0),
 			NextHop:     tunGateway,
 			Metric:      0,
-		}}); err != nil {
-			return fmt.Errorf("set default route: %w", err)
+		}}
+		var lastErr error
+		for attempt := 0; attempt < 10; attempt++ {
+			if lastErr = luid.SetRoutesForFamily(windows.AF_INET, routes); lastErr == nil {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
+		if lastErr != nil {
+			return fmt.Errorf("set default route: %w", lastErr)
+		}
+	}
+	// Windows' NLA marks bvpntun1 as Public/NoTraffic which makes some apps
+	// prefer Ethernet despite a lower interface metric. Drop it to Private
+	// best-effort; failing this is non-fatal.
+	if out, err := exec.Command("powershell.exe", "-NoProfile", "-Command",
+		"$p = Get-NetConnectionProfile -InterfaceAlias bvpntun1 -ErrorAction SilentlyContinue;"+
+			" if ($p) { Set-NetConnectionProfile -InterfaceIndex $p.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue }",
+	).CombinedOutput(); err != nil {
+		log.Printf("warn: set NetworkCategory failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -182,13 +218,19 @@ func (w *worker) pinServerRoute(serverAddr *net.UDPAddr) error {
 
 	luid := defaultRoute.InterfaceLUID
 	dest := netip.PrefixFrom(serverIP, serverIP.BitLen())
-	if err := luid.AddRoute(dest, nextHop, defaultRoute.Metric); err != nil {
-		return fmt.Errorf("add server host route: %w", err)
-	}
 
+	// Record cleanup state BEFORE AddRoute so a crash in any later step still
+	// triggers DeleteRoute. Also pre-delete any stale route left by a prior
+	// process that didn't get a chance to clean up — Windows AddRoute is
+	// non-idempotent and would otherwise fail with ERROR_OBJECT_ALREADY_EXISTS.
 	w.serverRouteLUID = &luid
 	w.serverRouteDest = dest
 	w.serverRouteNext = nextHop
+	_ = luid.DeleteRoute(dest, nextHop)
+
+	if err := luid.AddRoute(dest, nextHop, defaultRoute.Metric); err != nil {
+		return fmt.Errorf("add server host route: %w", err)
+	}
 	return nil
 }
 
@@ -267,7 +309,15 @@ func (w *worker) loopTunToUDP(ctx context.Context) error {
 			return err
 		}
 		for i := 0; i < n; i++ {
-			if _, err := w.udpConn.Write(bufs[i][:sizes[i]]); err != nil {
+			pkt := bufs[i][:sizes[i]]
+			// Only IPv4 packets whose source IP belongs to the tunnel
+			// CIDR should leave via UDP. Windows' weak-host send mode
+			// (enabled above) means LAN-sourced packets can otherwise
+			// end up on bvpntun1 and confuse the server's lease table.
+			if !inTunnelPrefix(pkt, w.tunPrefix) {
+				continue
+			}
+			if _, err := w.udpConn.Write(pkt); err != nil {
 				if ctx.Err() != nil {
 					return context.Canceled
 				}
@@ -276,4 +326,21 @@ func (w *worker) loopTunToUDP(ctx context.Context) error {
 		}
 		time.Sleep(0)
 	}
+}
+
+// inTunnelPrefix returns true iff the packet looks like an IPv4 datagram
+// whose source address sits inside the configured tunnel CIDR. Wintun
+// hands raw IP frames (no link-layer header) to userspace, so the first
+// byte's high nibble tells us the IP version.
+func inTunnelPrefix(pkt []byte, prefix netip.Prefix) bool {
+	if len(pkt) < 20 || pkt[0]>>4 != 4 {
+		// Drop non-IPv4 (incl. IPv6 link-local, ARP-ish) frames — they
+		// don't belong in the tunnel.
+		return false
+	}
+	src, ok := netip.AddrFromSlice(pkt[12:16])
+	if !ok {
+		return false
+	}
+	return prefix.Contains(src)
 }

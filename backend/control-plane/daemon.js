@@ -300,6 +300,26 @@ function releaseTunnelLease(body = {}) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  // CORS — the Tauri desktop client lives at tauri://localhost and needs to
+  // call this loopback daemon. Reflect any origin since we already gate by
+  // bind address (127.0.0.1) and optional BVPN_TOKEN.
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      req.headers['access-control-request-headers'] || 'Authorization,Content-Type'
+    );
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, ts: nowIso() });
   if (!authorize(req)) return send(res, 401, { error: 'Unauthorized' });
 

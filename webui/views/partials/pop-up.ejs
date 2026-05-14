@@ -1,0 +1,114 @@
+<!-- Eğer backend'den "error" adında bir mesaj gelirse bu pop-up çalışır -->
+<% if (typeof error !== 'undefined' && error) { %>
+
+  <div id="custom-error-popup" class="error-overlay">
+    <div class="error-card">
+      
+      <!-- Kırmızı Hata İkonu (SVG) -->
+      <div class="error-icon-wrapper">
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" class="bi bi-exclamation-triangle-fill" viewBox="0 0 16 16">
+          <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        </svg>
+      </div>
+
+      <h3 class="error-title">Oops! Bir Sorun Var</h3>
+      <!-- Backend'den gelen hata mesajı buraya basılır -->
+      <p class="error-message"><%= error %></p>
+      
+      <button class="btn btn-modern btn-error w-100" onclick="closeErrorPopup()">Tamam, anladım</button>
+    </div>
+  </div>
+
+  <style>
+    /* Arka planı karartan ve blur yapan katman */
+    .error-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100vh;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px); /* Cam efekti */
+      display: flex; justify-content: center; align-items: center;
+      z-index: 9999;
+      animation: fadeInOverlay 0.3s ease forwards;
+    }
+
+    /* Pop-up Kartının Kendisi (Projene Uyumlu Glassmorphism) */
+    .error-card {
+      width: 380px;
+      padding: 2.5rem;
+      border-radius: 24px;
+      background: rgba(20, 20, 25, 0.85); /* Koyu ama hafif saydam */
+      border: 1px solid rgba(239, 68, 68, 0.3); /* Kırmızımsı sınır çizgisi */
+      box-shadow: 0 30px 80px rgba(239, 68, 68, 0.15); /* Kırmızı parlama efekti */
+      text-align: center;
+      transform: translateY(30px);
+      animation: slideUpPopup 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    .error-icon-wrapper {
+      color: #ef4444; /* Kırmızı */
+      margin-bottom: 20px;
+      filter: drop-shadow(0 0 15px rgba(239, 68, 68, 0.5));
+    }
+
+    .error-title {
+      color: white;
+      font-weight: 700;
+      font-size: 1.4rem;
+      margin-bottom: 10px;
+    }
+
+    .error-message {
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+      margin-bottom: 25px;
+      line-height: 1.5;
+    }
+
+    
+    .btn-error {
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-error:hover {
+      background: linear-gradient(135deg, #dc2626, #991b1b);
+      box-shadow: 0 10px 30px rgba(239, 68, 68, 0.6);
+    }
+
+    
+    @keyframes fadeInOverlay {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUpPopup {
+      from { opacity: 0; transform: translateY(30px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    
+    /* Kapanış Animasyonu için Class */
+    .fade-out {
+      animation: fadeOut 0.3s ease forwards !important;
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to { opacity: 0; transform: scale(0.95); }
+    }
+  </style>
+
+  <script>
+    function closeErrorPopup() {
+      const overlay = document.getElementById('custom-error-popup');
+      const card = overlay.querySelector('.error-card');
+      
+      // Kapanış animasyonlarını ekle
+      overlay.classList.add('fade-out');
+      card.classList.add('fade-out');
+      
+      // Animasyon bitince elementi tamamen sil
+      setTimeout(() => {
+        overlay.remove();
+      }, 300);
+    }
+  </script>
+
+<% } %>

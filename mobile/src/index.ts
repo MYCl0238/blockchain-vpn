@@ -1,4 +1,6 @@
 export { BlockchainVpnTunnel } from './BlockchainVpnTunnel';
+export { configure } from './nativeModule';
+export type { BlockchainVpnTunnelOverrides } from './nativeModule';
 export type {
   TunnelCommand,
   TunnelControlCode,

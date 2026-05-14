@@ -24,3 +24,18 @@ logs/
 
 # Go build output
 bin/
+
+# Vendored app build artifacts
+apps/cross-platform-app/node_modules/
+apps/cross-platform-app/dist/
+apps/cross-platform-app/.expo/
+apps/cross-platform-app/src-tauri/target/
+apps/cross-platform-app/android/build/
+apps/cross-platform-app/android/.gradle/
+apps/cross-platform-app/android/.cxx/
+apps/cross-platform-app/android/app/build/
+apps/cross-platform-app/android/app/.cxx/
+apps/cross-platform-app/android/local.properties
+
+# Vendored webui build artifacts
+webui/node_modules/

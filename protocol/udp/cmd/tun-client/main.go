@@ -51,8 +51,11 @@ func main() {
 	flag.IntVar(&w.mtu, "mtu", 1380, "MTU for TUN interface")
 	flag.Parse()
 
-	if os.Geteuid() != 0 {
-		log.Fatal("tun-client must run as root (needs TUN + routing privileges)")
+	// Need TUN + routing privileges. Accept either root or the binary
+	// being granted CAP_NET_ADMIN (and CAP_NET_RAW) via setcap, so the
+	// daemon can spawn this as an unprivileged user.
+	if os.Geteuid() != 0 && !hasNetAdminCap() {
+		log.Fatal("tun-client must run as root or have CAP_NET_ADMIN (run setcap cap_net_admin,cap_net_raw+ep on the binary)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -257,4 +260,23 @@ func run(cmd string, args ...string) error {
 		return fmt.Errorf("%s %v: %w: %s", cmd, args, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func hasNetAdminCap() bool {
+	// /proc/self/status reports the current process's effective capability
+	// set as a bitmask. CAP_NET_ADMIN is bit 12; check bit 12 of CapEff.
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "CapEff:") {
+			continue
+		}
+		hex := strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
+		var caps uint64
+		fmt.Sscanf(hex, "%x", &caps)
+		return caps&(1<<12) != 0
+	}
+	return false
 }

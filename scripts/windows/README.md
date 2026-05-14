@@ -1,100 +1,96 @@
 # Windows Client
 
-This directory contains the Windows full-tunnel client and service tooling.
+Windows full-tunnel client, SCM service supervisor, and the unprivileged
+app-bridge daemon that exposes the JSON control surface defined in
+`docs/CLIENT_CONTROL_API.md`.
 
-## Current state
+## Components
 
-Implemented now:
+- `blockchain-vpn-tun-client.exe` — full-tunnel UDP client (cross-built from
+  `protocol/udp/cmd/tun-client`).
+- `blockchain-vpn-tun-service.exe` — SCM service that supervises the client.
+- `blockchain-vpn-app-bridge-service.exe` — SYSTEM Windows Service that drains
+  the request spool under `%ProgramData%\BlockchainVpn\bridge` and dispatches
+  each command through the PowerShell controller.
+- `blockchain-vpn-app-bridge.exe` — unprivileged CLI that posts a request and
+  waits for a JSON response; this is what the React Native/web UI calls.
+- `blockchain-vpn-windows-client.ps1` — PowerShell controller; talks to the
+  tunnel SCM service directly. Used both by an Administrator at the console
+  and by `blockchain-vpn-app-bridge-service.exe` to translate spool commands
+  into SCM operations.
 
-- custom VPN tunnel client to `blockchain-vpn-tun-server` on UDP `7001`
-- Windows service supervisor for `blockchain-vpn-tun-client.exe`
-- PowerShell controller for install/start/stop/status/health/logs
+The tunnel server is on UDP `:443` (see `protocol/udp/cmd/tun-server`).
 
-Not implemented yet:
-
-- Windows app bridge equivalent to the Linux bridge daemon
-
-The current controller must run as Administrator for install/start/stop actions.
-
-## Files
-
-- `blockchain-vpn-windows-client.ps1`
-- `blockchain-vpn-windows-client.env.ps1.example`
-- `build-tunnel.ps1`
-
-## Build
-
-```powershell
-.\scripts\windows\build-tunnel.ps1
-```
-
-Or:
+## Build (from any host with Go)
 
 ```powershell
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
-go build -o .\bin\blockchain-vpn-tun-client.exe .\protocol\udp\cmd\tun-client
-go build -o .\bin\blockchain-vpn-tun-service.exe .\protocol\udp\cmd\tun-service
+.\scripts\windows\build-windows.ps1
 ```
+
+Builds all four `bin\blockchain-vpn-*.exe` artifacts. The legacy
+`build-tunnel.ps1` still works for the two tunnel binaries only.
+
+## Install (Administrator PowerShell, on the Windows target)
+
+```powershell
+.\scripts\windows\install-windows.ps1
+```
+
+This:
+
+1. copies the four binaries into `C:\ProgramData\BlockchainVpn\bin\`;
+2. seeds `blockchain-vpn-windows-client.env.ps1` if missing;
+3. registers and starts the tunnel SCM service (`BlockchainVpnTunnel`);
+4. registers and starts the bridge service (`BlockchainVpnAppBridge`).
+
+Once installed, the unprivileged bridge CLI works without elevation:
+
+```powershell
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" status
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" up
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" health
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" down
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge.exe" logs 200
+```
+
+The response shape matches `docs/CLIENT_CONTROL_API.md` exactly so the UI
+adapter can be platform-agnostic.
 
 ## Configure
 
-Copy:
+Edit `C:\ProgramData\BlockchainVpn\blockchain-vpn-windows-client.env.ps1`:
+
+- `BVPN_TUN_SERVER_HOST` — VPS public IP/DNS.
+- `BVPN_TUN_SERVER_PORT` — usually `443`.
+- `BVPN_TUN_AUTO_LEASE = "true"` — required for multi-device; have each
+  Windows machine ask the control plane for its own tunnel IP.
+- `BVPN_TUN_API_URL` — control plane base (e.g.
+  `https://<host>/vpn-api`).
+- `BVPN_TUN_CLIENT_ID` (optional) — pin this device to a web-UI
+  `device_token` (e.g. `DEV-1234`).
+
+## Uninstall
 
 ```powershell
-C:\ProgramData\BlockchainVpn\blockchain-vpn-windows-client.env.ps1
+& "C:\ProgramData\BlockchainVpn\scripts\blockchain-vpn-windows-client.ps1" uninstall-service -Json
+& "C:\ProgramData\BlockchainVpn\bin\blockchain-vpn-app-bridge-service.exe" uninstall
 ```
 
-Set:
+## Files in this directory
 
-- `BVPN_TUN_SERVER_HOST`
-- `BVPN_TUN_SERVER_PORT`
-- `BVPN_TUN_CIDR`
-- `BVPN_TUN_GATEWAY`
-- optional `BVPN_TUN_SERVICE_BIN`
+- `blockchain-vpn-windows-client.ps1` — PowerShell controller.
+- `blockchain-vpn-windows-client.env.ps1.example` — config template.
+- `build-windows.ps1` — cross-compile all binaries.
+- `build-tunnel.ps1` — legacy two-binary build.
+- `install-windows.ps1` — one-shot install.
 
-Each Windows client must use a unique tunnel IP. The default example uses
-`10.99.0.3/24` so it does not collide with the Linux example client on
-`10.99.0.2/24`.
+## Spool layout
 
-## Install
+The bridge service owns `%ProgramData%\BlockchainVpn\bridge`:
 
-Run PowerShell as Administrator:
+- `requests\<uuid>.json` — written by the unprivileged client.
+- `responses\<uuid>.json` — written by the service.
+- `status.json` — periodic snapshot of `status` so callers can poll without
+  paying a controller round-trip.
 
-```powershell
-New-Item -ItemType Directory -Force -Path C:\ProgramData\BlockchainVpn\bin
-Copy-Item .\bin\blockchain-vpn-tun-client.exe C:\ProgramData\BlockchainVpn\bin\
-Copy-Item .\bin\blockchain-vpn-tun-service.exe C:\ProgramData\BlockchainVpn\bin\
-Copy-Item .\scripts\windows\blockchain-vpn-windows-client.env.ps1.example C:\ProgramData\BlockchainVpn\blockchain-vpn-windows-client.env.ps1
-
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 install-service -Json
-```
-
-## Test
-
-Run PowerShell as Administrator:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 status -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 up -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 health -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 down -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 logs -Json
-```
-
-If `BVPN_TUN_ROUTE_DEFAULT=true`, successful `health` should show the VPN server public IP.
-
-Useful one-time commands:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 install-service -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 is-enabled -Json
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\blockchain-vpn-windows-client.ps1 uninstall-service -Json
-```
-
-## Notes
-
-- this path targets the custom TUN tunnel on `7001`
-- it does not use the encrypted protocol worker on `7000`
-- the service is built around `blockchain-vpn-tun-service.exe`, which supervises `blockchain-vpn-tun-client.exe`
-- it is cross-built in this repo session; runtime verification still needs an actual Windows host or VM
+ACLs are set to allow `BUILTIN\Users` to drop requests and read responses.
