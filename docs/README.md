@@ -11,5 +11,8 @@ Current documentation entrypoints:
 - `REACT_NATIVE_INTEGRATION.md`
   What the React Native app should call and what each platform adapter does.
 
+- `INSTALL_ANDROID.md`, `INSTALL_LINUX.md`, `INSTALL_WINDOWS.md`
+  Install docs.
+
 - `VPN_Interim_Report.docx`
   Interim report describing the broader project goals.
