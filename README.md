@@ -55,17 +55,26 @@ Last verified 2026-05-13.
 - Per-device tunnel-lease allocation hooked into the webui (device_token → control-plane clientId)
 - Multi-peer custom tunnel routing on the server side for distinct client tunnel IPs
 
-## Binaries (built into `bin/`)
+## Binaries
 
-- `bin/blockchain-vpnd`
-- `bin/blockchain-vpn-target-worker`
-- `bin/blockchain-vpn-tun-server`
-- `bin/blockchain-vpn-tun-client` (+ `.exe`)
-- `bin/blockchain-vpn-tun-service.exe`
-- `bin/blockchain-vpn-app-bridge` (+ `.exe`)
-- `bin/blockchain-vpn-app-bridge-service.exe`
+`bin/` is a **build output directory and is gitignored** — it's never
+committed. End users should grab prebuilt artifacts from the
+[Releases page](https://github.com/MYCl0238/blockchain-vpn/releases);
+developers build locally with `bash scripts/build.sh`.
 
-Build with `bash scripts/build.sh` (or build per-binary under `protocol/udp/cmd/`).
+Resulting binaries (Linux + Windows cross-compiled):
+
+| Binary                                 | Platform | Used by                       |
+| -------------------------------------- | -------- | ----------------------------- |
+| `blockchain-vpnd`                      | Linux    | server (legacy worker)        |
+| `blockchain-vpn-target-worker`         | Linux    | server / target nodes         |
+| `blockchain-vpn-tun-server`            | Linux    | VPS tunnel terminator         |
+| `blockchain-vpn-tun-client` / `.exe`   | both     | client tunnel endpoint        |
+| `blockchain-vpn-tun-service.exe`       | Windows  | legacy SCM tunnel supervisor  |
+| `blockchain-vpn-app-bridge` / `.exe`   | both     | legacy file-spool bridge CLI  |
+| `blockchain-vpn-app-bridge-service.exe`| Windows  | legacy app-bridge SCM service |
+
+To build per-binary, see `protocol/udp/cmd/`.
 
 ## Docs
 
