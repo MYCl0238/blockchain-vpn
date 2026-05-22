@@ -53,6 +53,24 @@ export interface TunnelControlResult {
   state: TunnelControlState;
 }
 
+export interface NoiseStatus {
+  bound: boolean;
+  walletAddress: string | null;
+  clientPublicKey: string | null;
+  serverPublicKey: string | null;
+  tunnelHost: string | null;
+  tunnelPort: number | null;
+  boundAt: string | null;
+}
+
+export interface NoiseBindInput {
+  signature: string;
+  walletAddress?: string;
+  serverPublicKey: string;
+  tunnelHost: string;
+  tunnelPort: number;
+}
+
 export interface TunnelControlModule {
   up(): Promise<TunnelControlResult>;
   down(): Promise<TunnelControlResult>;
@@ -63,4 +81,7 @@ export interface TunnelControlModule {
   publicIp(): Promise<TunnelControlResult>;
   isEnabled(): Promise<TunnelControlResult>;
   logs(count?: number): Promise<string>;
+  getNoiseStatus(): Promise<NoiseStatus>;
+  bindNoise(input: NoiseBindInput): Promise<NoiseStatus>;
+  unbindNoise(): Promise<NoiseStatus>;
 }

@@ -10,6 +10,8 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.blockchainvpn.mobile.noisemobile.Noisemobile
+import com.blockchainvpn.mobile.noisemobile.Session
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -19,11 +21,15 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
- * Android counterpart of protocol/udp/cmd/tun-client. Builds a VpnService TUN,
- * opens a UDP socket protected from its own routing, and ferries raw IP
- * packets between TUN and UDP server:443 with no encapsulation framing of
- * its own. Mirrors what the Linux/Windows clients do at the wire level so
- * the same blockchain-vpn-tun-server speaks to it without changes.
+ * Android counterpart of protocol/udp/cmd/tun-client. Builds a VpnService
+ * TUN, opens a UDP socket protected from its own routing, performs a
+ * Noise IK handshake against blockchain-vpn-tun-server, and runs the
+ * resulting AEAD-sealed transport between TUN and UDP.
+ *
+ * Crypto comes from libs/noisemobile.aar — the same Go IK library that
+ * the Linux/Windows clients use, exposed via `gomobile bind`. The Kotlin
+ * side just owns TUN+socket I/O and the threading; every byte that
+ * leaves this device is sealed by ChaCha20-Poly1305 in the Go layer.
  */
 class BlockchainVpnService : VpnService() {
 
@@ -34,7 +40,9 @@ class BlockchainVpnService : VpnService() {
     val tunGateway: String,
     val mtu: Int,
     val routeDefault: Boolean,
-    val sessionName: String
+    val sessionName: String,
+    val noiseSeed: ByteArray,
+    val serverNoisePub: ByteArray
   ) {
     companion object {
       fun fromIntent(intent: Intent): Config = Config(
@@ -44,7 +52,9 @@ class BlockchainVpnService : VpnService() {
         tunGateway = intent.getStringExtra("tunGateway") ?: "10.99.0.1",
         mtu = intent.getIntExtra("mtu", 1380),
         routeDefault = intent.getBooleanExtra("routeDefault", true),
-        sessionName = intent.getStringExtra("sessionName") ?: "blockchain-vpn"
+        sessionName = intent.getStringExtra("sessionName") ?: "blockchain-vpn",
+        noiseSeed = intent.getByteArrayExtra("noiseSeed") ?: ByteArray(0),
+        serverNoisePub = intent.getByteArrayExtra("serverNoisePub") ?: ByteArray(0)
       )
     }
   }
@@ -53,6 +63,7 @@ class BlockchainVpnService : VpnService() {
   private var udpSocket: DatagramSocket? = null
   private var tunToUdpThread: Thread? = null
   private var udpToTunThread: Thread? = null
+  private var noiseSession: Session? = null
 
   @Volatile private var running = false
 
@@ -72,15 +83,22 @@ class BlockchainVpnService : VpnService() {
     }
 
     startInForeground(config.sessionName)
-    try {
-      startTunnel(config)
-      currentState.set(State.UP)
-    } catch (t: Throwable) {
-      Log.e(TAG, "startTunnel failed", t)
-      lastError.set(t.message ?: t.javaClass.simpleName)
-      currentState.set(State.ERROR)
-      stopForeground(STOP_FOREGROUND_REMOVE)
-      stopSelf()
+    // startTunnel does a synchronous Noise IK handshake — connect + send +
+    // receive on a UDP socket — which Android forbids on the main thread
+    // under StrictMode. Run the whole bring-up on a worker thread; flip
+    // currentState only after it succeeds. onStartCommand returns
+    // immediately so the system doesn't ANR-kill us.
+    thread(name = "bvpn-bring-up") {
+      try {
+        startTunnel(config)
+        currentState.set(State.UP)
+      } catch (t: Throwable) {
+        Log.e(TAG, "startTunnel failed", t)
+        lastError.set(t.message ?: t.javaClass.simpleName)
+        currentState.set(State.ERROR)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+      }
     }
     return START_STICKY
   }
@@ -92,10 +110,6 @@ class BlockchainVpnService : VpnService() {
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
-    // When the user swipes the app away from recents, keep the tunnel alive
-    // as long as it was running. The foreground notification (and START_STICKY
-    // semantics) carry the service through process death on most OEMs; this
-    // override stops Android from auto-stopping the service for us.
     if (currentState.get() == State.UP) {
       Log.i(TAG, "onTaskRemoved: keeping tunnel alive (foreground service)")
       return
@@ -104,7 +118,6 @@ class BlockchainVpnService : VpnService() {
   }
 
   override fun onRevoke() {
-    // User revoked VPN permission, or another VPN took over.
     stopTunnel()
     currentState.set(State.DOWN)
     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -112,6 +125,13 @@ class BlockchainVpnService : VpnService() {
   }
 
   private fun startTunnel(config: Config) {
+    if (config.noiseSeed.size != 32) {
+      throw IllegalArgumentException("noiseSeed must be 32 bytes (got ${config.noiseSeed.size})")
+    }
+    if (config.serverNoisePub.size != 32) {
+      throw IllegalArgumentException("serverNoisePub must be 32 bytes (got ${config.serverNoisePub.size})")
+    }
+
     val (tunIp, tunPrefix) = parseCidr(config.tunCidr)
 
     val builder = Builder()
@@ -122,8 +142,6 @@ class BlockchainVpnService : VpnService() {
       .addDnsServer("8.8.8.8")
 
     if (config.routeDefault) {
-      // Two half-default routes win over any literal 0.0.0.0/0 default the
-      // device may keep around (Wi-Fi/mobile), same pattern as Windows.
       builder.addRoute("0.0.0.0", 1)
       builder.addRoute("128.0.0.0", 1)
     } else {
@@ -138,8 +156,26 @@ class BlockchainVpnService : VpnService() {
       throw IllegalStateException("VpnService.protect() refused the UDP socket")
     }
     socket.connect(InetSocketAddress(config.serverHost, config.serverPort))
+    socket.soTimeout = 5_000
     udpSocket = socket
 
+    // --- Noise IK handshake ----------------------------------------------
+    val session = Noisemobile.newInitiator(config.noiseSeed, config.serverNoisePub, PROLOGUE)
+    val msgA = session.writeHandshakeA(ByteArray(0))
+    socket.send(DatagramPacket(msgA, msgA.size))
+
+    val handshakeBuf = ByteArray(BUF_SIZE)
+    val handshakePkt = DatagramPacket(handshakeBuf, handshakeBuf.size)
+    socket.receive(handshakePkt)
+    val msgB = handshakeBuf.copyOf(handshakePkt.length)
+    session.readHandshakeB(msgB)
+    if (!session.handshakeComplete()) {
+      throw IllegalStateException("noise handshake didn't complete after msg B")
+    }
+    noiseSession = session
+    Log.i(TAG, "noise handshake complete with ${config.serverHost}:${config.serverPort}")
+    // Restore the "block forever" semantics for the steady-state loop.
+    socket.soTimeout = 0
     running = true
 
     val inStream = FileInputStream(pfd.fileDescriptor)
@@ -158,16 +194,15 @@ class BlockchainVpnService : VpnService() {
           if (n <= 0) continue
           pkts++
           bytes += n
-          if (pkts <= 5) {
-            Log.i(TAG, "tun->udp #$pkts len=$n first-byte=0x${"%02x".format(buf[0].toInt() and 0xff)}")
-          }
+          val plain = if (n == buf.size) buf else buf.copyOf(n)
           try {
-            socket.send(DatagramPacket(buf, n))
+            val wire = session.encryptTransport(plain)
+            socket.send(DatagramPacket(wire, wire.size))
           } catch (t: Throwable) {
-            if (running) Log.w(TAG, "udp send: ${t.message}")
+            if (running) Log.w(TAG, "encrypt/send: ${t.message}")
           }
           val now = System.currentTimeMillis()
-          if (now - lastReport >= 5_000) {
+          if (now - lastReport >= 10_000) {
             Log.i(TAG, "tun->udp stats: pkts=$pkts bytes=$bytes")
             lastReport = now
           }
@@ -185,23 +220,31 @@ class BlockchainVpnService : VpnService() {
       val packet = DatagramPacket(buf, buf.size)
       var pkts = 0L
       var bytes = 0L
+      var drops = 0L
       var lastReport = System.currentTimeMillis()
       try {
         while (running) {
           try {
             socket.receive(packet)
-            pkts++
-            bytes += packet.length
-            if (pkts <= 5) {
-              Log.i(TAG, "udp->tun #$pkts len=${packet.length} first-byte=0x${"%02x".format(buf[0].toInt() and 0xff)}")
+            val wire = if (packet.length == buf.size) buf else buf.copyOf(packet.length)
+            val plain = try {
+              session.decryptTransport(wire)
+            } catch (t: Throwable) {
+              drops++
+              if (drops <= 5) {
+                Log.w(TAG, "decrypt drop #$drops: ${t.message}")
+              }
+              continue
             }
-            outStream.write(buf, 0, packet.length)
+            pkts++
+            bytes += plain.size
+            outStream.write(plain, 0, plain.size)
           } catch (t: Throwable) {
             if (running) Log.w(TAG, "udp recv: ${t.message}")
           }
           val now = System.currentTimeMillis()
-          if (now - lastReport >= 5_000) {
-            Log.i(TAG, "udp->tun stats: pkts=$pkts bytes=$bytes")
+          if (now - lastReport >= 10_000) {
+            Log.i(TAG, "udp->tun stats: pkts=$pkts bytes=$bytes drops=$drops")
             lastReport = now
           }
         }
@@ -209,7 +252,7 @@ class BlockchainVpnService : VpnService() {
         if (running) Log.e(TAG, "udp-to-tun loop", t)
       } finally {
         running = false
-        Log.i(TAG, "udp-to-tun exited: pkts=$pkts bytes=$bytes")
+        Log.i(TAG, "udp-to-tun exited: pkts=$pkts bytes=$bytes drops=$drops")
       }
     }
   }
@@ -222,6 +265,7 @@ class BlockchainVpnService : VpnService() {
     tunFd = null
     tunToUdpThread = null
     udpToTunThread = null
+    noiseSession = null
   }
 
   private fun startInForeground(sessionName: String) {
@@ -271,7 +315,8 @@ class BlockchainVpnService : VpnService() {
     private const val TAG = "BlockchainVpnService"
     private const val CHANNEL_ID = "blockchain-vpn"
     private const val NOTIFICATION_ID = 7001
-    private const val BUF_SIZE = 32 * 1024
+    private const val BUF_SIZE = 64 * 1024
+    private val PROLOGUE = "blockchain-vpn-v1".toByteArray(Charsets.UTF_8)
 
     const val ACTION_START = "expo.modules.blockchainvpntunnel.START"
     const val ACTION_STOP = "expo.modules.blockchainvpntunnel.STOP"
@@ -291,6 +336,8 @@ class BlockchainVpnService : VpnService() {
         putExtra("mtu", config.mtu)
         putExtra("routeDefault", config.routeDefault)
         putExtra("sessionName", config.sessionName)
+        putExtra("noiseSeed", config.noiseSeed)
+        putExtra("serverNoisePub", config.serverNoisePub)
       }
 
     fun stopIntent(context: Context): Intent =

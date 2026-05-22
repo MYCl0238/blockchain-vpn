@@ -45,4 +45,16 @@ dependencies {
   implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+  // Built from protocol/udp/noisemobile via `gomobile bind`. Provides
+  // com.blockchainvpn.mobile.noisemobile.{Session,DerivedKey,Noisemobile}
+  // plus the embedded cgo runtime. Sourced as a file dependency rather
+  // than a flatDir-repo artifact so the root Android project doesn't
+  // need any extra repository config — Gradle resolves transitive deps
+  // from the root build.gradle, which would not see a module-local
+  // flatDir repository. Rebuild with:
+  //   cd protocol/udp && gomobile bind \
+  //     -target=android -androidapi 24 \
+  //     -javapkg=com.blockchainvpn.mobile \
+  //     -o ../../mobile/android/libs/noisemobile.aar ./noisemobile
+  api files("${project.projectDir}/libs/noisemobile.aar")
 }

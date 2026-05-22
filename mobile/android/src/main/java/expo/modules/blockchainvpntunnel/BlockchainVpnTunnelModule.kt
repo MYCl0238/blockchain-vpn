@@ -1,8 +1,10 @@
 package expo.modules.blockchainvpntunnel
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import com.blockchainvpn.mobile.noisemobile.Noisemobile
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -11,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
@@ -32,12 +35,28 @@ class BlockchainVpnTunnelModule : Module() {
     var controlToken: String = "",
     var clientId: String = "",
     var mtu: Int = 1380,
-    var routeDefault: Boolean = true
+    var routeDefault: Boolean = true,
+    // Noise IK identity. noiseSeed is the 32-byte X25519 private scalar
+    // derived from the wallet signature (see /api/wallet/noise-identity
+    // on the webui); serverNoisePub is the 32-byte server static pubkey
+    // pinned from /api/vpn/config. Both must be set before up() can run.
+    var noiseSeed: ByteArray = ByteArray(0),
+    var serverNoisePub: ByteArray = ByteArray(0),
+    var walletAddress: String = ""
   )
 
   private val config = ClientConfig()
   private val pendingPermission = AtomicReference<Promise?>(null)
   private val ioScope = CoroutineScope(Dispatchers.IO)
+
+  // On-disk noise binding (private key + metadata). The keystore lives
+  // under the app's internal storage so it survives process restarts and
+  // is wiped on app-data clear. Format mirrors the desktop daemon:
+  //   <ctx.filesDir>/noise/static.key       — raw 32 bytes, mode 0600
+  //   <ctx.filesDir>/noise/binding.json     — wallet + pub + endpoint
+  private fun noiseDir(ctx: Context): File = File(ctx.filesDir, "noise").apply { mkdirs() }
+  private fun noiseKeyFile(ctx: Context): File = File(noiseDir(ctx), "static.key")
+  private fun noiseBindingFile(ctx: Context): File = File(noiseDir(ctx), "binding.json")
 
   override fun definition() = ModuleDefinition {
     Name("BlockchainVpnTunnel")
@@ -45,6 +64,9 @@ class BlockchainVpnTunnelModule : Module() {
     OnCreate {
       // Pick up override values from BuildConfig if the host app set them.
       tryLoadBuildConfig()?.let { merge(it) }
+      // Load any persisted noise binding so the tunnel can come up without
+      // forcing the user to re-pair after each app restart.
+      appContext.reactContext?.let { loadPersistedNoiseBinding(it) }
     }
 
     AsyncFunction("configure") { input: Map<String, Any?> ->
@@ -56,6 +78,61 @@ class BlockchainVpnTunnelModule : Module() {
       input["mtu"]?.let { config.mtu = (it as Number).toInt() }
       input["routeDefault"]?.let { config.routeDefault = it as Boolean }
       okResult("config", "configured", "config updated")
+    }
+
+    AsyncFunction("getNoiseStatus") { ->
+      val bound = config.noiseSeed.size == 32 && config.serverNoisePub.size == 32
+      val pub = if (bound) tryHex(Noisemobile.publicKeyHex(config.noiseSeed)) else null
+      mapOf(
+        "bound" to bound,
+        "walletAddress" to config.walletAddress.ifEmpty { null },
+        "clientPublicKey" to pub,
+        "serverPublicKey" to if (bound) bytesToHex(config.serverNoisePub) else null,
+        "tunnelHost" to config.serverHost,
+        "tunnelPort" to config.serverPort,
+        "boundAt" to null
+      )
+    }
+
+    AsyncFunction("bindNoise") { input: Map<String, Any?> ->
+      val signature = (input["signature"] as? String)
+        ?: throw IllegalArgumentException("signature required")
+      val serverPubHex = (input["serverPublicKey"] as? String)
+        ?: throw IllegalArgumentException("serverPublicKey required")
+      val walletAddress = (input["walletAddress"] as? String) ?: ""
+      input["tunnelHost"]?.let { config.serverHost = it.toString() }
+      input["tunnelPort"]?.let { config.serverPort = (it as Number).toInt() }
+
+      val derived = Noisemobile.deriveSeedFromSignatureHex(signature)
+      val serverPub = hexToBytes(serverPubHex)
+      if (serverPub.size != 32) {
+        throw IllegalArgumentException("serverPublicKey must be 64 hex chars")
+      }
+      config.noiseSeed = derived.priv
+      config.serverNoisePub = serverPub
+      config.walletAddress = walletAddress
+      appContext.reactContext?.let { persistNoiseBinding(it) }
+
+      mapOf(
+        "ok" to true,
+        "bound" to true,
+        "walletAddress" to walletAddress.ifEmpty { null },
+        "clientPublicKey" to bytesToHex(derived.pub),
+        "serverPublicKey" to serverPubHex.lowercase(),
+        "tunnelHost" to config.serverHost,
+        "tunnelPort" to config.serverPort
+      )
+    }
+
+    AsyncFunction("unbindNoise") { ->
+      config.noiseSeed = ByteArray(0)
+      config.serverNoisePub = ByteArray(0)
+      config.walletAddress = ""
+      appContext.reactContext?.let {
+        try { noiseKeyFile(it).delete() } catch (_: Throwable) {}
+        try { noiseBindingFile(it).delete() } catch (_: Throwable) {}
+      }
+      mapOf("ok" to true, "bound" to false)
     }
 
     AsyncFunction("up") { promise: Promise ->
@@ -175,6 +252,11 @@ class BlockchainVpnTunnelModule : Module() {
   private fun upAfterPermission(promise: Promise) {
     val ctx = appContext.reactContext ?: return promise.reject(Exceptions.AppContextLost())
     try {
+      if (config.noiseSeed.size != 32 || config.serverNoisePub.size != 32) {
+        promise.resolve(errResult("up", "not_paired",
+          "Noise identity not bound. Open the desktop pairing flow and call bindNoise()."))
+        return
+      }
       val (clientId, leasedCidr, leasedGateway) = allocateLease()
       val cfg = BlockchainVpnService.Config(
         serverHost = config.serverHost,
@@ -183,7 +265,9 @@ class BlockchainVpnTunnelModule : Module() {
         tunGateway = leasedGateway,
         mtu = config.mtu,
         routeDefault = config.routeDefault,
-        sessionName = "blockchain-vpn ($clientId)"
+        sessionName = "blockchain-vpn ($clientId)",
+        noiseSeed = config.noiseSeed,
+        serverNoisePub = config.serverNoisePub
       )
       ctx.startForegroundService(BlockchainVpnService.startIntent(ctx, cfg))
       BlockchainVpnService.currentState.set(BlockchainVpnService.Companion.State.UP)
@@ -335,6 +419,68 @@ class BlockchainVpnTunnelModule : Module() {
     overrides["controlToken"]?.let { config.controlToken = it }
     overrides["clientId"]?.let { config.clientId = it }
   }
+
+  // --- Noise binding persistence + hex helpers ---
+
+  private fun persistNoiseBinding(ctx: Context) {
+    if (config.noiseSeed.size != 32 || config.serverNoisePub.size != 32) return
+    try {
+      val keyFile = noiseKeyFile(ctx)
+      keyFile.writeBytes(config.noiseSeed)
+      try { keyFile.setReadable(false, false); keyFile.setReadable(true, true) } catch (_: Throwable) {}
+      try { keyFile.setWritable(false, false); keyFile.setWritable(true, true) } catch (_: Throwable) {}
+
+      val pub = try { Noisemobile.publicKeyHex(config.noiseSeed) } catch (_: Throwable) { "" }
+      val json = JSONObject().apply {
+        put("walletAddress", config.walletAddress)
+        put("clientPublicKey", pub)
+        put("serverPublicKey", bytesToHex(config.serverNoisePub))
+        put("tunnelHost", config.serverHost)
+        put("tunnelPort", config.serverPort)
+      }
+      noiseBindingFile(ctx).writeText(json.toString(), Charsets.UTF_8)
+    } catch (_: Throwable) {
+      // best-effort; pairing still works in-memory for this session
+    }
+  }
+
+  private fun loadPersistedNoiseBinding(ctx: Context) {
+    try {
+      val keyFile = noiseKeyFile(ctx)
+      val bindingFile = noiseBindingFile(ctx)
+      if (!keyFile.exists() || !bindingFile.exists()) return
+      val seed = keyFile.readBytes()
+      if (seed.size != 32) return
+      val json = JSONObject(bindingFile.readText(Charsets.UTF_8))
+      val serverPubHex = json.optString("serverPublicKey")
+      if (serverPubHex.length != 64) return
+      val serverPub = hexToBytes(serverPubHex)
+      if (serverPub.size != 32) return
+      config.noiseSeed = seed
+      config.serverNoisePub = serverPub
+      config.walletAddress = json.optString("walletAddress")
+      json.optString("tunnelHost").takeIf { it.isNotEmpty() }?.let { config.serverHost = it }
+      val port = json.optInt("tunnelPort", 0)
+      if (port > 0) config.serverPort = port
+    } catch (_: Throwable) {
+      // ignore — leaves the user on the pair screen
+    }
+  }
+
+  private fun bytesToHex(b: ByteArray): String =
+    b.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+  private fun hexToBytes(hex: String): ByteArray {
+    val s = if (hex.startsWith("0x") || hex.startsWith("0X")) hex.substring(2) else hex
+    if (s.length % 2 != 0) return ByteArray(0)
+    val out = ByteArray(s.length / 2)
+    for (i in out.indices) {
+      out[i] = ((Character.digit(s[i * 2], 16) shl 4) or Character.digit(s[i * 2 + 1], 16)).toByte()
+    }
+    return out
+  }
+
+  private fun tryHex(value: String?): String? = value?.takeIf { it.isNotEmpty() }
 
   companion object {
     private const val VPN_PERMISSION_REQUEST_CODE = 0x42BC // 17084
