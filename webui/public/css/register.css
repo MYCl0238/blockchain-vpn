@@ -127,3 +127,38 @@ h2 {
     left: 130%;
   }
 }
+
+.lead-text {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.92rem;
+  margin-bottom: 1.5rem;
+}
+
+.btn-modern.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-modern.btn-outline:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.wallet-error {
+  min-height: 1.4em;
+  margin-top: 0.6rem;
+  color: #fca5a5;
+  font-size: 0.9rem;
+}
+
+/* MetaMask brand-orange button. Used wherever the click triggers a
+   wallet personal_sign so the user reads it as "MetaMask" instantly. */
+.btn-metamask {
+  background: linear-gradient(135deg, #F6851B, #E2761B) !important;
+}
+.btn-metamask:hover {
+  box-shadow: 0 10px 30px rgba(246, 133, 27, 0.45) !important;
+}

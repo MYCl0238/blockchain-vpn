@@ -1,9 +1,33 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { readFileSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 
 const UI_MODE = process.env.BVPN_UI_MODE || "local-bridge";
+const NOISE_PROLOGUE = "blockchain-vpn-v1";
+const NOISE_PUBKEY_PATH = process.env.BVPN_SERVER_NOISE_PUBKEY_PATH || "";
+const TUNNEL_HOST = process.env.BVPN_TUNNEL_HOST || PROXY_HOST_FALLBACK();
+const TUNNEL_PORT = Number(process.env.BVPN_TUNNEL_PORT || 7001);
+
+function PROXY_HOST_FALLBACK() {
+  return process.env.BVPN_PROXY_HOST || "84.21.171.106";
+}
+
+function loadServerNoisePubKey() {
+  if (!NOISE_PUBKEY_PATH) return null;
+  try {
+    const hex = readFileSync(NOISE_PUBKEY_PATH, "utf8").trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+      console.warn(`BVPN_SERVER_NOISE_PUBKEY_PATH=${NOISE_PUBKEY_PATH} did not contain 64 hex chars`);
+      return null;
+    }
+    return hex.toLowerCase();
+  } catch (err) {
+    console.warn(`could not read server noise pubkey from ${NOISE_PUBKEY_PATH}: ${err.message}`);
+    return null;
+  }
+}
 const BRIDGE_BIN =
   process.env.BVPN_APP_BRIDGE_BIN || "blockchain-vpn-app-bridge";
 const BRIDGE_ENABLED = process.env.BVPN_APP_BRIDGE_ENABLED !== "false";
@@ -49,6 +73,18 @@ export function getVpnUiConfig() {
       password: PROXY_PASSWORD,
       bypassList: PROXY_BYPASS_LIST,
       display: `${PROXY_SCHEME.toUpperCase()} ${PROXY_HOST}:${PROXY_PORT}`,
+    },
+    // Noise IK tunnel parameters. `server_pubkey` is the pinned static
+    // public key the tun-client must trust on connect. `prologue` must
+    // match the value on both sides of the handshake (mixed into the
+    // handshake hash). `tunnel` is the UDP endpoint of the tun-server.
+    noise: {
+      prologue: NOISE_PROLOGUE,
+      server_pubkey: loadServerNoisePubKey(),
+      tunnel: {
+        host: TUNNEL_HOST,
+        port: TUNNEL_PORT,
+      },
     },
   };
 }

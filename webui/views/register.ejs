@@ -18,26 +18,30 @@
     <div class="bg"></div>
 
     <div class="card-modern">
-      <h2>Kayıt Ol</h2>
+      <h2>Hesap Oluştur</h2>
 
-      <form action="/api/auth/register" method="POST">
-        <div class="mb-3">
-          <input
-            type="email"
-            name="email"
-            class="form-control"
-            placeholder="E-mail adresiniz"
-          />
-        </div>
+      <p class="lead-text">
+        Cüzdanınızla imza atarak yeni bir Blockchain VPN hesabı oluşturun.
+        E-posta sonradan profil sayfasından eklenebilir.
+      </p>
 
-        <button type="submit" class="btn btn-modern w-100">
-          Hesap Oluştur
-        </button>
-      </form>
+      <button
+        type="button"
+        class="btn btn-modern btn-metamask w-100"
+        data-wallet-purpose="register"
+      >
+        MetaMask ile Kayıt
+      </button>
+      <div id="walletError" class="wallet-error"></div>
+
+      <a href="/auth/login" class="btn btn-modern btn-outline w-100 mt-2">
+        Zaten hesabınız var mı? Giriş yapın
+      </a>
       <button class="btn btn-modern w-50" onclick="window.history.back()">
         Geri Dön
       </button>
     </div>
     <%- include('partials/pop-up') %>
+    <script src="/js/wallet-auth.js"></script>
   </body>
 </html>

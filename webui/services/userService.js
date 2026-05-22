@@ -28,17 +28,6 @@ export async function getUser(db, id) {
   return result.rows[0];
 }
 
-export async function updateUserEmail(db, id, mail) {
-  const query = `
-    UPDATE users
-    SET recovery_email = $1
-    WHERE id = $2
-    RETURNING *;
-  `;
-  const result = await db.query(query, [mail, id]);
-  return result.rows[0];
-}
-
 /*
 export async function s(db, id) {
   const user = await getUser(db, id);

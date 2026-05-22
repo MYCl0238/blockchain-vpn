@@ -11,8 +11,6 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/css/login.css" />
-
-    <style></style>
   </head>
 
   <body>
@@ -22,52 +20,31 @@
     <div class="card-modern">
       <h2>Güvenli Giriş 🔒</h2>
 
-      <form action="/api/auth/login" method="POST" id="loginForm">
-        <div
-          class="mb-5 d-flex justify-content-center align-items-center gap-2"
-        >
-          <input
-            type="text"
-            class="form-control key-input"
-            maxlength="4"
-            required
-          />
-          <span class="dash">-</span>
-          <input
-            type="text"
-            class="form-control key-input"
-            maxlength="4"
-            required
-          />
-          <span class="dash">-</span>
-          <input
-            type="text"
-            class="form-control key-input"
-            maxlength="4"
-            required
-          />
-          <span class="dash">-</span>
-          <input
-            type="text"
-            class="form-control key-input"
-            maxlength="4"
-            required
-          />
-        </div>
+      <p class="lead-text">
+        Cüzdanınızla imza atarak hesabınıza giriş yapın.
+      </p>
 
-        <input type="hidden" name="id" id="realLoginKey" />
+      <button
+        type="button"
+        class="btn btn-modern btn-metamask w-100"
+        data-wallet-purpose="login"
+      >
+        MetaMask ile Giriş
+      </button>
+      <div id="walletError" class="wallet-error"></div>
 
-        <button type="submit" class="btn btn-modern w-100">Bağlan</button>
-        <button
-          class="btn btn-modern w-50 btn-back"
-          onclick="window.history.back()"
-        >
-          Geri Dön
-        </button>
-      </form>
+      <a href="/auth/register" class="btn btn-modern btn-outline w-100 mt-2">
+        Hesabınız yok mu? Kayıt Olun
+      </a>
+      <button
+        class="btn btn-modern w-50 btn-back"
+        onclick="window.history.back()"
+      >
+        Geri Dön
+      </button>
     </div>
 
     <%- include('partials/pop-up') %>
-    <script src="/js/login.js"></script>
+    <script src="/js/wallet-auth.js"></script>
   </body>
 </html>

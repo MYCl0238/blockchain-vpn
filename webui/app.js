@@ -11,7 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import viewRoutes from "./routes/viewRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import vpnRoutes from "./routes/vpnRoutes.js";
+import walletAuthRoutes from "./routes/walletAuthRoutes.js";
+import blockchainRoutes from "./routes/blockchainRoutes.js";
 import pool from "./db.js";
+import { initDatabase } from "./services/databaseSetup.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -79,8 +82,20 @@ app.use("/api", (req, res, next) => {
 
 app.use("/", viewRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/wallet", walletAuthRoutes);
+app.use("/api/blockchain", blockchainRoutes);
 app.use("/api/vpn", vpnRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Sunucu http://localhost:${PORT} adresinde çalışıyor...`);
-});
+async function startServer() {
+  try {
+    await initDatabase(pool);
+    app.listen(PORT, () => {
+      console.log(`Sunucu http://localhost:${PORT} adresinde çalışıyor...`);
+    });
+  } catch (err) {
+    console.error("Veritabani tablolari baslatilamadi:", err);
+    process.exit(1);
+  }
+}
+
+startServer();

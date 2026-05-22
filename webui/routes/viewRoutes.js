@@ -3,6 +3,7 @@ import pool from "../db.js";
 import { getUser } from "../services/userService.js";
 import { requireLogin } from "../middleware/authMiddleware.js";
 import { getUserDevices, setDeviceOnline } from "../services/deviceService.js";
+import { getUserIdentitySummary } from "../services/blockchainService.js";
 
 const router = express.Router();
 
@@ -18,12 +19,15 @@ router.get("/auth/login", (req, res) => {
   res.render("login.ejs");
 });
 
+router.get("/auth/desktop-pairing", requireLogin, (req, res) => {
+  res.render("desktop-pairing");
+});
+
 router.get("/dashboard", requireLogin, async (req, res) => {
   try {
-    let yeniKayıt = req.session.yeniKayıt;
-    req.session.yeniKayıt = null; // console.log(req.session.yeniKayıt);
-
-    res.render("dashboard.ejs", { yeniKayıt });
+    const newRegistration = req.session.newRegistration;
+    req.session.newRegistration = null;
+    res.render("dashboard.ejs", { newRegistration });
   } catch (err) {
     console.error("Dashboard yüklenirken hata:", err);
     res.status(500).send("Sunucu hatası");
@@ -40,18 +44,16 @@ router.get("/user/profile", requireLogin, async (req, res) => {
     }
 
     const devices = await getUserDevices(pool, req.session.userId);
-
-    const profileError = req.session.profileError;
-    const profileSuccess = req.session.profileSuccess;
-    req.session.profileError = null;
-    req.session.profileSuccess = null;
+    const blockchainIdentity = await getUserIdentitySummary(
+      pool,
+      req.session.userId,
+    );
 
     res.render("profile", {
       user,
       devices,
-      profileError,
-      profileSuccess,
       currentDeviceToken,
+      blockchainIdentity,
     });
   } catch (error) {
     console.error("Profil yüklenirken hata:", error);

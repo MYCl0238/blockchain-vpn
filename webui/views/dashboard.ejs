@@ -47,37 +47,26 @@
         Kullanıcı Paneli
       </a>
 
+      <a href="/auth/desktop-pairing" class="btn btn-secondary w-100 btn-glow mb-2">
+        Masaüstü İstemciyi Eşleştir
+      </a>
+
       <form method="POST" action="/api/auth/logout">
         <button class="btn btn-danger w-100 btn-glow">Bağlantıyı Kes</button>
       </form>
     </div>
-    <% if (typeof yeniKayıt !== 'undefined' && yeniKayıt) { %>
-        <div id="welcomePopup" class="popup-overlay">
-          <div class="popup-card">
-          <button class="close-btn" onclick="closePopup()">&times;</button> 
-          <h3 class="text-success mb-3" style="font-weight: 700;">Kayıt Başarılı! 🎉</h3>
+    <% if (typeof newRegistration !== 'undefined' && newRegistration) { %>
+      <div id="welcomePopup" class="popup-overlay">
+        <div class="popup-card">
+          <button class="close-btn" onclick="closePopup()">&times;</button>
+          <h3 class="text-success mb-3" style="font-weight: 700;">Hesabınız oluşturuldu! 🎉</h3>
           <p class="mb-4" style="color: #9ca3af; font-size: 14px;">
-            Bu sizin anahtarınızdır. Lütfen giriş yapabilmek için kopyalayıp güvenli bir yere kaydedin.
+            Cüzdanınız hesabınıza bağlandı. Kimlik detaylarınızı Kullanıcı Paneli'nden görüntüleyebilirsiniz.
           </p>
-        <div class="info-box d-flex justify-content-between align-items-center mb-3">
-          <div class="text-start">
-            <div class="info-label">Kullanıcı ID</div>
-            <div class="info-value" id="newUserId"><%= yeniKayıt.id %></div>
-          </div>
-          <button class="btn btn-sm btn-outline-light copy-btn" onclick="copyId()">Kopyala</button>
-        </div>
-      <div class="info-box text-start">
-        <div class="info-label">Kayıtlı E-Posta</div>
-        <div class="info-value" style="letter-spacing: normal;">
-          <%= yeniKayıt.mail ? yeniKayıt.mail : "Belirtilmedi" %>
         </div>
       </div>
-    </div>
-    
-  </div>
-  
-  <script src="/js/dashboard/popup.js"></script>  
-<% } %>
+      <script src="/js/dashboard/popup.js"></script>
+    <% } %>
 
     <script src="/js/dashboard/dashboard-api.js">
       

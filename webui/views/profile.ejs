@@ -17,33 +17,34 @@
     <div class="bg-orb"></div>
 
     <div class="profile-card">
-      <h2>Profil Detaylari</h2>
+      <h2>Kullanıcı Paneli</h2>
 
       <div class="info-box">
-        <div class="info-label">Kullanici ID (Baglanti Anahtari)</div>
-        <div class="info-value"><%= user.id %></div>
+        <div class="info-label">Cüzdan Adresi</div>
+        <div class="info-value mono"><%= user.wallet_address || "—" %></div>
       </div>
 
-      <div class="info-box">
-        <div class="info-label">Kayitli E-Posta</div>
-       
-        <form action="/api/auth/profile/email" method="POST" class="email-update-form">
-          <input
-            type="email"
-            name="email"
-            class="email-input"
-            placeholder="E-posta adresiniz"
-            value="<%= user.recovery_email || '' %>"
-          />
-          <button type="submit" class="email-save-btn">Kaydet</button>
-        </form>
-        <% if (typeof profileError !== 'undefined' && profileError) { %>
-          <div class="profile-message profile-message-error"><%= profileError %></div>
+      <% if (typeof blockchainIdentity !== 'undefined' && blockchainIdentity) { %>
+        <div class="info-box">
+          <div class="info-label">Blockchain Kimlik</div>
+          <div class="info-value mono"><%= blockchainIdentity.privateMemberId %></div>
+          <div class="info-sub">
+            <%= blockchainIdentity.blockCount %> blok ·
+            <%= blockchainIdentity.chainValid ? "zincir geçerli" : "zincir hatalı" %>
+            (<%= blockchainIdentity.chainBlockCount %> toplam)
+          </div>
+        </div>
+
+        <% if (blockchainIdentity.latestBlock) { %>
+          <div class="info-box">
+            <div class="info-label">Son Blok</div>
+            <div class="info-value mono">
+              #<%= blockchainIdentity.latestBlock.block_index %> · <%= blockchainIdentity.latestBlock.event_type %>
+            </div>
+            <div class="info-sub mono"><%= blockchainIdentity.latestBlock.block_hash %></div>
+          </div>
         <% } %>
-        <% if (typeof profileSuccess !== 'undefined' && profileSuccess) { %>
-          <div class="profile-message profile-message-success"><%= profileSuccess %></div>
-        <% } %>
-      </div>
+      <% } %>
 
       <div class="info-box">
         <div class="info-label" style="text-align: center">Cihazlar</div>

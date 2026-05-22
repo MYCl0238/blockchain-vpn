@@ -231,3 +231,25 @@ body {
     transform: scale(0.95);
   }
 }
+
+.dashboard-section {
+  width: 100%;
+  margin-top: 1.5rem;
+  text-align: left;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.dashboard-section-title {
+  color: rgba(255, 255, 255, 0.75);
+  margin: 0 0 0.4rem 0;
+  font-weight: 600;
+}
+
+.info-value.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+  word-break: break-all;
+}

@@ -302,3 +302,16 @@ h2 {
     min-height: 44px;
   }
 }
+
+.info-value.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+  word-break: break-all;
+}
+
+.info-sub {
+  margin-top: 0.4rem;
+  font-size: 12px;
+  color: #6b7280;
+}

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Masaüstü İstemcisi Eşleştir</title>
+    <%- include('partials/icons') %>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/login.css" />
+    <style>
+      .signature-box {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 14px;
+        padding: 14px;
+        margin-top: 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.92);
+        word-break: break-all;
+        text-align: left;
+      }
+      .pair-step {
+        text-align: left;
+        margin: 1.2rem 0;
+        color: rgba(255, 255, 255, 0.75);
+        font-size: 0.95rem;
+      }
+      .pair-step strong { color: white; }
+      .pair-error {
+        min-height: 1.4em;
+        margin-top: 0.6rem;
+        color: #fca5a5;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="bg"></div>
+    <div class="bg"></div>
+
+    <div class="card-modern" style="width: 560px;">
+      <h2>Masaüstü İstemciyi Eşleştir</h2>
+
+      <div class="pair-step">
+        <strong>1.</strong> Aşağıdaki butona bastığınızda cüzdanınız sabit
+        bir mesajı imzalar. Aynı cüzdan aynı imzayı üretir — bu yüzden
+        imza, bu cihaza özel Noise anahtarınızı türetmek için yeterlidir.
+      </div>
+
+      <button
+        id="signButton"
+        type="button"
+        class="btn btn-modern btn-metamask w-100"
+      >
+        MetaMask ile İmzala ve Göster
+      </button>
+      <div id="pairError" class="pair-error"></div>
+
+      <div id="pairResult" style="display: none">
+        <div class="pair-step">
+          <strong>2.</strong> Aşağıdaki imza dizgisini masaüstü
+          uygulamanızın <em>Eşleştir</em> ekranına yapıştırın. İmza
+          oluşturulduktan sonra <strong>private key bu sayfayı veya
+          sunucuyu hiç terk etmez</strong> — sadece bu uzun dizgi sizde
+          kalır.
+        </div>
+
+        <div class="signature-box" id="signatureBox"></div>
+        <button class="btn btn-modern w-100 mt-2" id="copyBtn">
+          Kopyala
+        </button>
+
+        <div class="pair-step">
+          <strong>Sunucu Noise Anahtarı:</strong>
+          <div class="signature-box" id="serverPubBox">yükleniyor…</div>
+          <strong>Tünel:</strong>
+          <div class="signature-box" id="tunnelBox">yükleniyor…</div>
+        </div>
+      </div>
+
+      <a href="/dashboard" class="btn btn-modern btn-outline w-100 mt-3">Dashboard'a Dön</a>
+    </div>
+
+    <script>
+      async function sign() {
+        const errorBox = document.getElementById("pairError");
+        const button = document.getElementById("signButton");
+        errorBox.textContent = "";
+
+        if (!window.ethereum) {
+          errorBox.textContent = "MetaMask bulunamadı. Önce tarayıcı eklentisini yükleyin.";
+          return;
+        }
+
+        button.disabled = true;
+        button.textContent = "MetaMask bekleniyor...";
+
+        try {
+          // Get the canonical message + check current bound state.
+          const idResp = await fetch("/api/wallet/noise-identity", { credentials: "include" });
+          const id = await idResp.json();
+          if (!idResp.ok) throw new Error(id.error || "İmza mesajı alınamadı.");
+
+          const [account] = await window.ethereum.request({ method: "eth_requestAccounts" });
+          const signature = await window.ethereum.request({
+            method: "personal_sign",
+            params: [id.message, account],
+          });
+
+          // If wallet isn't bound yet, also POST it so the server records the binding.
+          if (!id.bound) {
+            const bindResp = await fetch("/api/wallet/noise-identity", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ signature }),
+            });
+            const bindBody = await bindResp.json();
+            if (!bindResp.ok) throw new Error(bindBody.error || "Sunucuya bağlama başarısız.");
+          }
+
+          // Fetch the rest of what the desktop client needs.
+          const cfgResp = await fetch("/api/vpn/config", { credentials: "include" });
+          const cfg = await cfgResp.json();
+          if (!cfgResp.ok) throw new Error("VPN config alınamadı.");
+
+          document.getElementById("signatureBox").textContent = signature;
+          document.getElementById("serverPubBox").textContent = cfg.state.noise.server_pubkey;
+          document.getElementById("tunnelBox").textContent = `${cfg.state.noise.tunnel.host}:${cfg.state.noise.tunnel.port}`;
+          document.getElementById("pairResult").style.display = "block";
+        } catch (err) {
+          errorBox.textContent = err.message || "İmza iptal edildi.";
+        } finally {
+          button.disabled = false;
+          button.textContent = "Yeniden İmzala";
+        }
+      }
+
+      document.getElementById("signButton").addEventListener("click", sign);
+      document.getElementById("copyBtn").addEventListener("click", () => {
+        navigator.clipboard.writeText(document.getElementById("signatureBox").textContent);
+      });
+    </script>
+  </body>
+</html>
