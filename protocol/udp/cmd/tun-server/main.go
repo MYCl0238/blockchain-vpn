@@ -1,3 +1,25 @@
+// blockchain-vpn-tun-server (Noise IK edition).
+//
+// One process terminates many encrypted tunnels from clients. Wire format:
+//
+//	[ PV1 | FrameType | body ]
+//
+// Frame types (see internal/noise/wire.go):
+//
+//	FrameHandshakeA — client initiates IK; payload may carry hints
+//	FrameHandshakeB — sent by server in reply (never received here)
+//	FrameTransport  — AEAD-sealed inner IP packet
+//
+// Authentication: every connecting client presents a static Curve25519
+// public key inside msg A. The server accepts the handshake only if the
+// pubkey appears in --peers (file allowlist). The webui writes that
+// allowlist when users bind their Noise identity via the wallet flow.
+//
+// Multi-peer routing: sessions are indexed both by (src_udp_addr) for
+// the UDP read loop and by inner tunnel IP for the TUN read loop. NAT
+// rebinds are absorbed by re-keying byUDPKey on the first transport
+// frame from a new source endpoint.
+
 package main
 
 import (
@@ -12,9 +34,15 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"unsafe"
+
+	"time"
+
+	"blockchain-vpn/protocol/udp/internal/keystore"
+	"blockchain-vpn/protocol/udp/internal/noise"
+	"blockchain-vpn/protocol/udp/internal/peers"
+	"blockchain-vpn/protocol/udp/internal/sessman"
 )
 
 const (
@@ -36,12 +64,19 @@ type worker struct {
 	wanIf     string
 	enableNAT bool
 	mtu       int
-	tunFile   *os.File
-	udpConn   *net.UDPConn
-	peerMu    sync.RWMutex
-	peers     map[string]*net.UDPAddr
-	rules     []string
-	debugSeen int
+
+	noiseKeyPath string
+	peersPath    string
+	peersDSN     string
+
+	tunFd   int
+	udpConn *net.UDPConn
+	rules   []string
+
+	static   noise.Keypair
+	prologue []byte
+	peers    peers.Allower
+	sessions *sessman.Manager
 }
 
 func main() {
@@ -52,6 +87,14 @@ func main() {
 	flag.StringVar(&w.wanIf, "wan-if", "eth0", "WAN interface for NAT")
 	flag.BoolVar(&w.enableNAT, "enable-nat", true, "Enable iptables FORWARD + MASQUERADE")
 	flag.IntVar(&w.mtu, "mtu", 1380, "MTU for TUN interface")
+	flag.StringVar(&w.noiseKeyPath, "noise-key", "/etc/blockchain-vpn/server-static.key",
+		"Path to server's 32-byte X25519 static private key (auto-generated on first run)")
+	flag.StringVar(&w.peersPath, "peers", "",
+		"Path to allowlist file with one hex client static pubkey per line "+
+			"(used if --peers-db is empty)")
+	flag.StringVar(&w.peersDSN, "peers-db", "",
+		"Postgres DSN for live allowlist (queries users.noise_public_key); "+
+			"takes priority over --peers when set")
 	flag.Parse()
 
 	if os.Geteuid() != 0 {
@@ -67,7 +110,42 @@ func main() {
 }
 
 func (w *worker) run(ctx context.Context) error {
-	w.peers = make(map[string]*net.UDPAddr)
+	w.tunFd = -1
+	kp, created, err := keystore.LoadOrCreateStatic(w.noiseKeyPath)
+	if err != nil {
+		return fmt.Errorf("load server static: %w", err)
+	}
+	w.static = kp
+	if created {
+		log.Printf("generated new server static key; published at %s.pub.hex", w.noiseKeyPath)
+	}
+	log.Printf("server static pubkey: %s", keystore.PublicKeyHex(kp))
+
+	switch {
+	case w.peersDSN != "":
+		pg, err := peers.NewPostgres(ctx, w.peersDSN)
+		if err != nil {
+			return fmt.Errorf("load peers (db): %w", err)
+		}
+		defer pg.Close()
+		w.peers = pg
+		log.Printf("loaded %d allowed peers from postgres", pg.Count())
+		go pg.RefreshLoop(ctx, 30*time.Second, func(err error) {
+			log.Printf("peers refresh error: %v", err)
+		})
+	case w.peersPath != "":
+		fp, err := peers.NewFile(w.peersPath)
+		if err != nil {
+			return fmt.Errorf("load peers (file): %w", err)
+		}
+		w.peers = fp
+		log.Printf("loaded %d allowed peers from %s", fp.Count(), w.peersPath)
+	default:
+		return fmt.Errorf("no peer source configured (set --peers-db or --peers)")
+	}
+
+	w.prologue = []byte("blockchain-vpn-v1")
+	w.sessions = sessman.New()
 
 	if err := w.setupTun(); err != nil {
 		return fmt.Errorf("setup tun: %w", err)
@@ -91,7 +169,8 @@ func (w *worker) run(ctx context.Context) error {
 	}
 	defer w.udpConn.Close()
 
-	log.Printf("tun-server running: tun=%s cidr=%s udp=%s nat=%v", w.tunName, w.tunCIDR, w.listen, w.enableNAT)
+	log.Printf("tun-server running: tun=%s cidr=%s udp=%s nat=%v",
+		w.tunName, w.tunCIDR, w.listen, w.enableNAT)
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- w.loopUDPToTun(ctx) }()
@@ -100,8 +179,9 @@ func (w *worker) run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		_ = w.udpConn.Close()
-		if w.tunFile != nil {
-			_ = w.tunFile.Close()
+		if w.tunFd > 0 {
+			_ = syscall.Close(w.tunFd)
+			w.tunFd = -1
 		}
 		return context.Canceled
 	case err := <-errCh:
@@ -112,7 +192,11 @@ func (w *worker) run(ctx context.Context) error {
 func (w *worker) setupTun() error {
 	_ = run("ip", "link", "del", w.tunName)
 
-	f, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+	// Open /dev/net/tun via raw syscall so we never hand the fd to Go's
+	// netpoll runtime. Newer Go runtimes (1.21+) try to add character
+	// devices to epoll and fail with "not pollable" on TUN devices. We
+	// avoid that by doing all reads/writes through syscall.Read/Write.
+	fd, err := syscall.Open("/dev/net/tun", syscall.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return err
 	}
@@ -121,22 +205,22 @@ func (w *worker) setupTun() error {
 	copy(req.Name[:], []byte(w.tunName))
 	req.Flags = iffTun | iffNoPI
 
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(tunSetIFF), uintptr(unsafe.Pointer(&req)))
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(tunSetIFF), uintptr(unsafe.Pointer(&req)))
 	if errno != 0 {
-		_ = f.Close()
+		_ = syscall.Close(fd)
 		return errno
 	}
 
-	w.tunFile = f
+	w.tunFd = fd
 	if err := run("ip", "addr", "replace", w.tunCIDR, "dev", w.tunName); err != nil {
-		_ = f.Close()
-		w.tunFile = nil
+		_ = syscall.Close(fd)
+		w.tunFd = -1
 		_ = run("ip", "link", "del", w.tunName)
 		return err
 	}
 	if err := run("ip", "link", "set", "dev", w.tunName, "mtu", fmt.Sprint(w.mtu), "up"); err != nil {
-		_ = f.Close()
-		w.tunFile = nil
+		_ = syscall.Close(fd)
+		w.tunFd = -1
 		_ = run("ip", "link", "del", w.tunName)
 		return err
 	}
@@ -144,8 +228,9 @@ func (w *worker) setupTun() error {
 }
 
 func (w *worker) cleanupTun() {
-	if w.tunFile != nil {
-		_ = w.tunFile.Close()
+	if w.tunFd > 0 {
+		_ = syscall.Close(w.tunFd)
+		w.tunFd = -1
 	}
 	_ = run("ip", "link", "del", w.tunName)
 }
@@ -182,6 +267,9 @@ func (w *worker) cleanupRules() {
 	}
 }
 
+// loopUDPToTun consumes datagrams from the UDP socket: handshake msgs
+// become new sessions, transport frames get decrypted and forwarded to
+// the TUN device.
 func (w *worker) loopUDPToTun(ctx context.Context) error {
 	buf := make([]byte, 65535)
 	for {
@@ -192,50 +280,124 @@ func (w *worker) loopUDPToTun(ctx context.Context) error {
 			}
 			return err
 		}
-		srcIP, _, err := packetEndpoints(buf[:n])
-		if err == nil && srcIP.IsValid() {
-			key := srcIP.String()
-			w.peerMu.Lock()
-			existing := w.peers[key]
-			if existing != nil && existing.String() != addr.String() {
-				// Two different UDP peers claim the same tunnel source IP.
-				// Without a lease, the second client overwrites the first and
-				// only one direction gets return traffic. Log loudly so the
-				// operator can re-check BVPN_TUN_AUTO_LEASE / client_id setup.
-				log.Printf("WARN: tunnel IP %s rebound: %s -> %s (multi-device collision; ensure each client has a unique lease)", key, existing.String(), addr.String())
-			}
-			w.peers[key] = cloneUDPAddr(addr)
-			w.peerMu.Unlock()
-			if w.debugSeen < 20 {
-				log.Printf("udp->tun peer=%s src=%s len=%d", addr.String(), key, n)
-			}
-		} else if w.debugSeen < 20 {
-			log.Printf("udp->tun invalid-packet peer=%s len=%d err=%v", addr.String(), n, err)
-		}
-
-		if _, err := w.tunFile.Write(buf[:n]); err != nil {
-			if ctx.Err() != nil {
-				return context.Canceled
-			}
-			log.Printf("udp->tun write failed peer=%s len=%d err=%v", addr.String(), n, err)
-			return err
-		}
-		if w.debugSeen < 20 {
-			log.Printf("udp->tun write-ok peer=%s len=%d", addr.String(), n)
-		}
-		w.debugSeen++
+		w.handleUDPDatagram(buf[:n], addr)
 	}
 }
 
+func (w *worker) handleUDPDatagram(packet []byte, addr *net.UDPAddr) {
+	version, frameType, body, err := noise.ParseFrame(packet)
+	if err != nil {
+		log.Printf("drop short frame from %s (%d bytes)", addr, len(packet))
+		return
+	}
+	if version != noise.PV1 {
+		log.Printf("drop unsupported protocol version %d from %s", version, addr)
+		return
+	}
+
+	switch frameType {
+	case noise.FrameHandshakeA:
+		w.handleHandshakeA(addr, body)
+	case noise.FrameHandshakeB:
+		log.Printf("dropped FrameHandshakeB from %s (servers don't receive B)", addr)
+	case noise.FrameTransport:
+		w.handleTransport(addr, body)
+	default:
+		log.Printf("unknown frame type %d from %s", frameType, addr)
+	}
+}
+
+func (w *worker) handleHandshakeA(addr *net.UDPAddr, body []byte) {
+	msgA, err := noise.ParseHandshakeA(body)
+	if err != nil {
+		log.Printf("malformed FrameHandshakeA from %s: %v", addr, err)
+		return
+	}
+
+	sess := noise.NewResponder(w.prologue, w.static)
+	if _, err := sess.ReadHandshake(msgA); err != nil {
+		log.Printf("ReadHandshakeA from %s failed: %v", addr, err)
+		return
+	}
+
+	peer := sess.PeerStatic()
+	if !w.peers.Allow(peer) {
+		log.Printf("REJECT handshake from %s — peer key %x not in allowlist", addr, peer[:8])
+		return
+	}
+
+	msgB, err := sess.WriteHandshake(nil)
+	if err != nil {
+		log.Printf("WriteHandshakeB for %s failed: %v", addr, err)
+		return
+	}
+	wireB := noise.MarshalHandshakeB(msgB)
+	if _, err := w.udpConn.WriteToUDP(wireB, addr); err != nil {
+		log.Printf("send HandshakeB to %s: %v", addr, err)
+		return
+	}
+
+	if existing := w.sessions.LookupByPeer(peer); existing != nil {
+		log.Printf("re-handshake from peer %x; evicting prior session @%s", peer[:8], existing.UDPAddr)
+		w.sessions.Remove(existing)
+	}
+	w.sessions.Put(addr, peer, sess)
+	log.Printf("session up: peer=%x addr=%s", peer[:8], addr)
+}
+
+func (w *worker) handleTransport(addr *net.UDPAddr, body []byte) {
+	t, err := noise.ParseTransport(body)
+	if err != nil {
+		log.Printf("malformed transport from %s: %v", addr, err)
+		return
+	}
+
+	entry := w.sessions.LookupByUDP(addr)
+	if entry == nil {
+		log.Printf("transport from unknown UDP source %s — drop", addr)
+		return
+	}
+
+	plaintext, err := entry.Session.Decrypt(t)
+	if err != nil {
+		log.Printf("Decrypt from %s failed: %v", addr, err)
+		return
+	}
+
+	// Route by inner src → session. Clients legitimately send multiple
+	// inner sources (e.g. a 10.99.0.x tunnel IP plus IPv6 link-local
+	// from the kernel stack); we always rebind to the latest IPv4 in
+	// our tunnel CIDR so reply lookups by IPv4 dst find the right
+	// session. Non-IPv4 sources update the binding only if no IPv4 has
+	// been seen yet — keeps return traffic to 10.99.0.X working.
+	src, _, err := packetEndpoints(plaintext)
+	if err == nil && src.IsValid() {
+		preferRebind := src.Is4() || !entry.TunIP.IsValid() || !entry.TunIP.Is4()
+		if preferRebind && entry.TunIP != src {
+			w.sessions.BindTunIP(entry, src)
+			log.Printf("bound tun ip %s to peer %x", src, entry.PeerKey[:8])
+		}
+	}
+
+	if _, err := syscall.Write(w.tunFd, plaintext); err != nil {
+		log.Printf("tun write failed: %v", err)
+	}
+}
+
+// loopTunToUDP reads packets from the TUN device and encrypts them back
+// to the session owner identified by inner dst IP.
 func (w *worker) loopTunToUDP(ctx context.Context) error {
 	buf := make([]byte, 65535)
 	for {
-		n, err := w.tunFile.Read(buf)
+		n, err := syscall.Read(w.tunFd, buf)
 		if err != nil {
 			if ctx.Err() != nil {
 				return context.Canceled
 			}
 			return err
+		}
+		if n == 0 {
+			return errors.New("tun read returned EOF")
 		}
 
 		_, dstIP, err := packetEndpoints(buf[:n])
@@ -243,13 +405,18 @@ func (w *worker) loopTunToUDP(ctx context.Context) error {
 			continue
 		}
 
-		w.peerMu.RLock()
-		peer := w.peers[dstIP.String()]
-		w.peerMu.RUnlock()
-		if peer == nil {
+		entry := w.sessions.LookupByTunIP(dstIP)
+		if entry == nil {
 			continue
 		}
-		if _, err := w.udpConn.WriteToUDP(buf[:n], peer); err != nil {
+
+		ct, err := entry.Session.Encrypt(buf[:n])
+		if err != nil {
+			log.Printf("Encrypt for peer %x failed: %v", entry.PeerKey[:8], err)
+			continue
+		}
+		wire := noise.MarshalTransport(ct)
+		if _, err := w.udpConn.WriteToUDP(wire, entry.UDPAddr); err != nil {
 			if ctx.Err() != nil {
 				return context.Canceled
 			}
@@ -319,18 +486,5 @@ func packetEndpoints(packet []byte) (netip.Addr, netip.Addr, error) {
 		return src, dst, nil
 	default:
 		return netip.Addr{}, netip.Addr{}, fmt.Errorf("unsupported ip version")
-	}
-}
-
-func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
-	if addr == nil {
-		return nil
-	}
-	ip := make(net.IP, len(addr.IP))
-	copy(ip, addr.IP)
-	return &net.UDPAddr{
-		IP:   ip,
-		Port: addr.Port,
-		Zone: addr.Zone,
 	}
 }
