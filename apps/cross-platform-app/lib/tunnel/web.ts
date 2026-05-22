@@ -11,9 +11,28 @@ import type {
 } from './types';
 
 const DEFAULT_BASE = 'http://127.0.0.1:8787';
-const DEFAULT_PROFILE_ID = 'mobile-default';
-const DEFAULT_PROFILE_NAME = 'mobile-default';
-const DEFAULT_PROFILE_COMMAND = 'blockchain-vpn-tun-client';
+
+// Noise binding sourced from the user's wallet via the webui's
+// /auth/desktop-pairing page. Once /v1/noise/bind has been called, the
+// daemon owns the Noise key + tun-client spawn — the Tauri app just
+// hits /v1/connect and /v1/disconnect.
+export interface NoiseStatus {
+  bound: boolean;
+  walletAddress: string | null;
+  clientPublicKey: string | null;
+  serverPublicKey: string | null;
+  tunnelHost: string | null;
+  tunnelPort: number | null;
+  boundAt: string | null;
+}
+
+export interface NoiseBindInput {
+  signature: string;
+  walletAddress?: string;
+  serverPublicKey: string;
+  tunnelHost: string;
+  tunnelPort: number;
+}
 
 let baseUrl = DEFAULT_BASE;
 let token: string | null = null;
@@ -88,36 +107,6 @@ function mapStatusToResult(
   return { ok, command, code: connected ? 'started' : 'stopped', message, state };
 }
 
-function buildTunClientArgs(): string[] {
-  const host = lastConfig?.serverHost || '127.0.0.1';
-  const port = lastConfig?.serverPort || 443;
-  const mtu = lastConfig?.mtu || 1380;
-  const args = ['-server', `${host}:${port}`, '-mtu', String(mtu)];
-  if (lastConfig?.routeDefault !== false) args.push('-route-default');
-  return args;
-}
-
-async function ensureProfile(): Promise<string> {
-  // Always replace the profile so args track the current DEFAULT_CONFIG.
-  // /v1/profiles is the source of truth for the spawn command; recreating
-  // it on each connect is cheap and lets us forward routeDefault/mtu/etc.
-  try {
-    await request(`/v1/profiles/${DEFAULT_PROFILE_ID}`, { method: 'DELETE' });
-  } catch (_) {
-    // no-op: profile may not exist yet
-  }
-  await request('/v1/profiles', {
-    method: 'POST',
-    body: JSON.stringify({
-      id: DEFAULT_PROFILE_ID,
-      name: DEFAULT_PROFILE_NAME,
-      command: DEFAULT_PROFILE_COMMAND,
-      args: buildTunClientArgs(),
-    }),
-  });
-  return DEFAULT_PROFILE_ID;
-}
-
 export async function configure(overrides: TunnelConfig): Promise<TunnelControlResult> {
   lastConfig = { ...lastConfig, ...overrides };
   if (overrides.controlBaseUrl) baseUrl = overrides.controlBaseUrl;
@@ -126,13 +115,24 @@ export async function configure(overrides: TunnelConfig): Promise<TunnelControlR
 }
 
 export async function up(): Promise<TunnelControlResult> {
-  const profileId = await ensureProfile();
+  // Daemon owns Noise key + tun-client args; no profile management here.
   await request('/v1/connect', {
     method: 'POST',
-    body: JSON.stringify({ profileId }),
+    body: JSON.stringify({}),
   });
   const raw = await request<any>('/v1/status');
   return mapStatusToResult('up', raw, true, 'connect requested');
+}
+
+export async function getNoiseStatus(): Promise<NoiseStatus> {
+  return request<NoiseStatus>('/v1/noise/status');
+}
+
+export async function bindNoise(input: NoiseBindInput): Promise<NoiseStatus> {
+  return request<NoiseStatus>('/v1/noise/bind', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 export async function down(): Promise<TunnelControlResult> {
@@ -150,4 +150,4 @@ export async function status(): Promise<TunnelControlResult> {
   }
 }
 
-export const BlockchainVpnTunnel = { up, down, status };
+export const BlockchainVpnTunnel = { up, down, status, getNoiseStatus, bindNoise };

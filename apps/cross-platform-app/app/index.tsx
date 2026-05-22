@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { loadStoredUser } from '../lib/api';
 import AppButton from '../lib/ui/AppButton';
@@ -12,6 +12,15 @@ export default function WelcomeScreen() {
 
   useEffect(() => {
     (async () => {
+      // On Tauri desktop, the wallet flow happens in the system browser
+      // (no MetaMask in webkit2gtk). Skip the welcome/login dance and
+      // route straight to the dashboard, which renders a Pair-this-device
+      // screen when the local daemon has no Noise binding yet.
+      if (Platform.OS === 'web') {
+        router.replace('/dashboard');
+        return;
+      }
+
       const user = await loadStoredUser();
       if (user) {
         router.replace('/dashboard');

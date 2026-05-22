@@ -14,7 +14,7 @@ const PLACEHOLDER_MESSAGES = [
   { id: '2', text: 'Partner identity verified successfully.', sender: 'system' },
   {
     id: '3',
-    text: 'Mesajlaşma özelliği yakında etkinleştirilecek.',
+    text: 'Messaging will be enabled in a future release.',
     sender: 'system',
   },
 ];
@@ -32,7 +32,7 @@ export default function MessagesScreen() {
       </Text>
 
       <View style={styles.banner}>
-        <Text style={styles.bannerText}>Beta — gönderme şu an devre dışı</Text>
+        <Text style={styles.bannerText}>Beta — sending is currently disabled</Text>
       </View>
 
       <FlatList
@@ -53,7 +53,7 @@ export default function MessagesScreen() {
       <View style={styles.inputRow}>
         <TextInput
           editable={false}
-          placeholder="Mesaj gönderme henüz aktif değil"
+          placeholder="Message sending is not active yet"
           placeholderTextColor="#64748b"
           style={[styles.input, styles.inputDisabled]}
         />

@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-type AppButtonType = 'primary' | 'success' | 'danger' | 'muted';
+type AppButtonType = 'primary' | 'success' | 'danger' | 'muted' | 'wallet';
 
 type AppButtonProps = {
   title: string;
@@ -16,11 +16,15 @@ type AppButtonProps = {
   type?: AppButtonType;
 };
 
+// 'wallet' uses the MetaMask brand orange (#F6851B → #E2761B) so any
+// button that triggers a wallet-signing flow reads as "MetaMask" at a
+// glance across all clients (Linux Tauri + Android share this).
 const COLORS: Record<AppButtonType, [string, string]> = {
   primary: ['#7c3aed', '#2563eb'],
   success: ['#22c55e', '#15803d'],
   danger: ['#ef4444', '#991b1b'],
   muted: ['#475569', '#1e293b'],
+  wallet: ['#F6851B', '#E2761B'],
 };
 
 export default function AppButton({

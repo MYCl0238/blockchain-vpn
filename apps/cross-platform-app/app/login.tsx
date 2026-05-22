@@ -1,9 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +16,17 @@ import AppButton from '../lib/ui/AppButton';
 
 export default function LoginScreen() {
   const router = useRouter();
+  // The 16-char ID login is retired. Linux/Tauri desktop and mobile both
+  // use wallet-based MetaMask auth via the local daemon's Noise pairing
+  // (or the cloud control-plane on Android). Anyone landing here on a
+  // current build is bounced to the dashboard, which renders the new
+  // pairing flow when not yet set up.
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      router.replace('/dashboard');
+    }
+  }, [router]);
+
   const [parts, setParts] = useState(['', '', '', '']);
   const [busy, setBusy] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -37,7 +49,7 @@ export default function LoginScreen() {
   async function submit() {
     const full = parts.join('');
     if (full.length !== 16) {
-      Alert.alert('Eksik anahtar', 'Lütfen 16 karakterlik anahtarın tamamını girin.');
+      Alert.alert('Missing key', 'Please enter all 16 characters of your access key.');
       return;
     }
     setBusy(true);
@@ -49,7 +61,7 @@ export default function LoginScreen() {
       router.replace('/dashboard');
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Giriş hatası', e?.message ?? String(e));
+      Alert.alert('Login error', e?.message ?? String(e));
     }
   }
 
@@ -66,7 +78,7 @@ export default function LoginScreen() {
         />
         <Text style={styles.title}>Secure Login</Text>
         <Text style={styles.subtitle}>
-          Web sitesinde ya da uygulamada oluşturduğun 16 karakterlik anahtarı gir.
+          Enter the 16-character access key you generated on the web site or in the app.
         </Text>
 
         <View style={styles.row}>

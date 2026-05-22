@@ -11,7 +11,11 @@
       "identifier": "http:default",
       "allow": [
         { "url": "http://127.0.0.1:8787/*" },
-        { "url": "https://84.21.171.106/*" }
+        { "url": "https://84.21.171.106/*" },
+        { "url": "https://api4.ipify.org/*" },
+        { "url": "https://ipv4.icanhazip.com/*" },
+        { "url": "https://v4.ident.me/*" },
+        { "url": "https://ifconfig.me/*" }
       ]
     }
   ]

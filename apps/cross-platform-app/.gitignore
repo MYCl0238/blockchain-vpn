@@ -40,11 +40,15 @@ app-example
 
 # generated native folders
 /ios
-/android
-# Prebuild artifacts
+# /android is tracked: we keep manual native edits (package id, MainApplication
+# wiring for the blockchain-vpn-tunnel module, strings.xml app label) that a
+# fresh `expo prebuild` would wipe.
+# Prebuild artifacts (build outputs only)
 android/build
 android/app/build
 android/.gradle
 android/.cxx
 android/app/.cxx
 android/local.properties
+android/.kotlin/
+android/app/release/

@@ -1,8 +1,9 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +15,15 @@ import AppButton from '../lib/ui/AppButton';
 
 export default function RegisterScreen() {
   const router = useRouter();
+  // Desktop now uses MetaMask + Noise pairing on the webui (see /auth/
+  // desktop-pairing). The email-based register is mobile-only legacy
+  // surface; on Tauri we route the user to the dashboard's pair screen.
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      router.replace('/dashboard');
+    }
+  }, [router]);
+
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -22,12 +32,12 @@ export default function RegisterScreen() {
     try {
       const user = await apiRegister(email.trim() || null);
       Alert.alert(
-        'Hesap oluşturuldu',
-        `Bu sizin anahtarınızdır. Lütfen güvenli bir yere kaydedin:\n\n${formatKey(user.id)}`,
-        [{ text: 'Tamam', onPress: () => router.replace('/dashboard') }],
+        'Account created',
+        `This is your access key. Please copy it somewhere safe:\n\n${formatKey(user.id)}`,
+        [{ text: 'OK', onPress: () => router.replace('/dashboard') }],
       );
     } catch (e: any) {
-      Alert.alert('Kayıt hatası', e?.message ?? String(e));
+      Alert.alert('Registration error', e?.message ?? String(e));
     } finally {
       setBusy(false);
     }
@@ -40,12 +50,12 @@ export default function RegisterScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Create Account</Text>
         <Text style={styles.subtitle}>
-          E-posta isteğe bağlıdır; yalnızca anahtarınızı kaybederseniz kurtarma
-          için kullanılır.
+          Email is optional; it is only used to help recover your account
+          if you lose your access key.
         </Text>
 
         <TextInput
-          placeholder="E-posta (opsiyonel)"
+          placeholder="Email (optional)"
           placeholderTextColor="#94a3b8"
           value={email}
           onChangeText={setEmail}
