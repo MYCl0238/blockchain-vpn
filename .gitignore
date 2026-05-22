@@ -25,6 +25,17 @@ logs/
 # Go build output
 bin/
 
+# Stray Go build outputs (debug binaries dropped in cmd dirs)
+protocol/udp/tun-client
+protocol/udp/tun-client.exe
+protocol/udp/tun-server
+
+# gomobile bind output (regenerate with `gomobile bind -target=android ./protocol/udp/noisemobile`)
+mobile/android/libs/*.aar
+
+# Release staging dir — artifacts uploaded via `gh release` instead
+releases/
+
 # Vendored app build artifacts
 apps/cross-platform-app/node_modules/
 apps/cross-platform-app/dist/

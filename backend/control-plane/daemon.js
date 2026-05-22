@@ -11,6 +11,13 @@ const STATE_PATH = path.join(DATA_DIR, 'state.json');
 const PROTO_SESSIONS_PATH = path.join(DATA_DIR, 'proto_sessions.json');
 const PROTO_EVENTS_PATH = path.join(DATA_DIR, 'proto_events.ndjson');
 const TUNNEL_LEASES_PATH = path.join(DATA_DIR, 'tunnel_leases.json');
+const NOISE_PRIV_PATH = path.join(DATA_DIR, 'noise-static.key');
+const NOISE_CFG_PATH = path.join(DATA_DIR, 'noise-config.json');
+
+const TUN_CLIENT_BIN = process.env.BVPN_TUN_CLIENT_BIN || '/usr/local/bin/blockchain-vpn-tun-client';
+const TUN_NAME = process.env.BVPN_TUN_NAME || 'bvpntun1';
+const TUN_MTU = Number(process.env.BVPN_TUN_MTU || 1380);
+const ROUTE_DEFAULT = process.env.BVPN_ROUTE_DEFAULT !== 'false';
 
 const HOST = process.env.BVPN_HOST || process.env.VPND_HOST || '0.0.0.0';
 const PORT = Number(process.env.BVPN_PORT || process.env.VPND_PORT || 8787);
@@ -287,6 +294,130 @@ function allocateTunnelLease(body = {}) {
   };
 }
 
+// ----------------------------------------------------------------
+// Noise IK pairing — derives a static X25519 keypair from a wallet
+// personal_sign signature of the canonical "Noise identity derivation"
+// message. The signature is deterministic per wallet (RFC 6979), so
+// the same wallet always derives the same X25519 key — and the same
+// key was independently re-derived server-side when the user bound
+// their noise_public_key via the webui.
+// ----------------------------------------------------------------
+function pkcs8WrapX25519(raw32) {
+  if (raw32.length !== 32) throw new Error('X25519 private key must be 32 bytes');
+  const prefix = Buffer.from([
+    0x30, 0x2e,
+    0x02, 0x01, 0x00,
+    0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e,
+    0x04, 0x22,
+    0x04, 0x20,
+  ]);
+  return Buffer.concat([prefix, raw32]);
+}
+
+function deriveX25519FromSignature(sigHex) {
+  const sig = Buffer.from(String(sigHex || '').replace(/^0x/i, ''), 'hex');
+  if (sig.length < 65) throw new Error('signature must be at least 65 bytes');
+
+  const seed = crypto.hkdfSync(
+    'sha256',
+    sig,
+    Buffer.from('blockchain-vpn-noise-v1'),
+    Buffer.alloc(0),
+    32
+  );
+  const privBuf = Buffer.from(seed);
+
+  const privObj = crypto.createPrivateKey({
+    key: pkcs8WrapX25519(privBuf),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const pubDer = crypto.createPublicKey(privObj).export({ format: 'der', type: 'spki' });
+  const pubBuf = pubDer.slice(pubDer.length - 32);
+  return { priv: privBuf, pub: pubBuf };
+}
+
+function readNoiseConfig() {
+  return readJson(NOISE_CFG_PATH, null);
+}
+
+function writeNoiseConfig(obj) {
+  writeJson(NOISE_CFG_PATH, obj);
+}
+
+function noiseStatus() {
+  const cfg = readNoiseConfig();
+  const hasKey = fs.existsSync(NOISE_PRIV_PATH);
+  return {
+    bound: Boolean(cfg && hasKey),
+    walletAddress: cfg?.walletAddress || null,
+    clientPublicKey: cfg?.clientPublicKey || null,
+    serverPublicKey: cfg?.serverPublicKey || null,
+    tunnelHost: cfg?.tunnelHost || null,
+    tunnelPort: cfg?.tunnelPort || null,
+    boundAt: cfg?.boundAt || null,
+  };
+}
+
+function bindNoise(body) {
+  const { signature, walletAddress, serverPublicKey, tunnelHost, tunnelPort } = body || {};
+  if (!signature) throw new Error('signature required');
+  if (!serverPublicKey || !/^[0-9a-f]{64}$/i.test(serverPublicKey)) {
+    throw new Error('serverPublicKey must be 64 hex chars');
+  }
+  if (!tunnelHost) throw new Error('tunnelHost required');
+  if (!tunnelPort) throw new Error('tunnelPort required');
+
+  const { priv, pub } = deriveX25519FromSignature(signature);
+  fs.writeFileSync(NOISE_PRIV_PATH, priv, { mode: 0o600 });
+  const cfg = {
+    walletAddress: walletAddress || null,
+    clientPublicKey: pub.toString('hex'),
+    serverPublicKey: String(serverPublicKey).toLowerCase(),
+    tunnelHost: String(tunnelHost),
+    tunnelPort: Number(tunnelPort),
+    boundAt: nowIso(),
+  };
+  writeNoiseConfig(cfg);
+  return { ok: true, ...noiseStatus() };
+}
+
+function unbindNoise() {
+  try { fs.unlinkSync(NOISE_PRIV_PATH); } catch {}
+  try { fs.unlinkSync(NOISE_CFG_PATH); } catch {}
+  return { ok: true, ...noiseStatus() };
+}
+
+function buildTunClientProfile() {
+  const cfg = readNoiseConfig();
+  if (!cfg) throw new Error('Noise client not paired — POST to /v1/noise/bind first');
+  if (!fs.existsSync(NOISE_PRIV_PATH)) throw new Error('Noise private key file missing');
+
+  // Allocate a tunnel IP for this device using the noise pubkey as the
+  // clientId so reconnects reuse the same lease.
+  const clientId = `noise:${cfg.clientPublicKey.slice(0, 16)}`;
+  const lease = allocateTunnelLease({ clientId, platform: 'linux', deviceName: 'tauri-desktop' });
+  const tunCidr = lease.lease.cidr;
+
+  return {
+    id: 'noise-default',
+    name: 'noise-default',
+    command: TUN_CLIENT_BIN,
+    args: [
+      '--tun', TUN_NAME,
+      '--tun-cidr', tunCidr,
+      '--server', `${cfg.tunnelHost}:${cfg.tunnelPort}`,
+      '--mtu', String(TUN_MTU),
+      '--noise-key', NOISE_PRIV_PATH,
+      '--server-pubkey', cfg.serverPublicKey,
+      '--route-default=' + (ROUTE_DEFAULT ? 'true' : 'false'),
+    ],
+    cwd: process.cwd(),
+    env: {},
+    createdAt: nowIso(),
+  };
+}
+
 function releaseTunnelLease(body = {}) {
   const clientId = normalizeClientId(body.clientId);
   if (!clientId) return { ok: false, removed: false };
@@ -358,13 +489,35 @@ const server = http.createServer(async (req, res) => {
       return send(res, 201, { profile });
     }
 
+    if (req.method === 'GET' && url.pathname === '/v1/noise/status') {
+      return send(res, 200, noiseStatus());
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/noise/bind') {
+      const body = await parseBody(req);
+      return send(res, 200, bindNoise(body));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/noise/unbind') {
+      return send(res, 200, unbindNoise());
+    }
+
     if (req.method === 'POST' && url.pathname === '/v1/connect') {
       const st = status();
       if (active || st.connected) return send(res, 409, { error: 'Already connected', state: st });
+
+      // Noise-paired devices ignore the profile selector and use the
+      // bound static key. Falls back to a legacy profile only if no
+      // Noise binding exists.
       const body = await parseBody(req);
-      const profiles = readJson(PROFILES_PATH, []);
-      const profile = profiles.find((p) => p.id === body.profileId);
-      if (!profile) return send(res, 404, { error: 'Profile not found' });
+      let profile;
+      if (readNoiseConfig()) {
+        profile = buildTunClientProfile();
+      } else {
+        const profiles = readJson(PROFILES_PATH, []);
+        profile = profiles.find((p) => p.id === body.profileId);
+        if (!profile) return send(res, 404, { error: 'Profile not found and Noise client not paired' });
+      }
       const a = startProfile(profile);
       return send(res, 200, { ok: true, connected: true, profileId: a.profileId, pid: a.pid });
     }
