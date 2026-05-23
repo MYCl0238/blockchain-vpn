@@ -169,9 +169,13 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
-step "Enabling + starting blockchain-vpn-control-plane.service"
+step "Enabling + (re)starting blockchain-vpn-control-plane.service"
 sudo systemctl daemon-reload
-sudo systemctl enable --now blockchain-vpn-control-plane.service
+sudo systemctl enable blockchain-vpn-control-plane.service >/dev/null
+# Restart unconditionally — if the unit is already running from a prior install
+# `enable --now` is a no-op and the Node process keeps serving stale code from
+# the previous daemon.js (causing 404s on /v1/noise/* etc. after an upgrade).
+sudo systemctl restart blockchain-vpn-control-plane.service
 sleep 1
 sudo systemctl is-active blockchain-vpn-control-plane.service >/dev/null \
   || warn "Daemon did not become active — check 'journalctl -u blockchain-vpn-control-plane.service'"
