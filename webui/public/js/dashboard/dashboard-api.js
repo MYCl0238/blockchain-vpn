@@ -89,9 +89,9 @@
       setText("serverIp", data.ip);
       setText("serverIsp", data.org);
     } catch (err) {
-      console.error("IP bilgisi çekilemedi:", err);
-      setText("serverLocation", "Bilinmiyor");
-      setText("serverIp", "Bağlantı Hatası");
+      console.error("Could not fetch IP info:", err);
+      setText("serverLocation", "Unknown");
+      setText("serverIp", "Connection error");
     }
   }
 
@@ -156,12 +156,12 @@
           console.warn("proxy credential sync failed:", e);
         }
         if (cfg && cfg.ok && cfg.config && cfg.config.enabled) {
-          setButtonState(btn, "connected", "Bağlı", "Eklenti üzerinden bağlı (tıkla: kes)");
-          setMessage("Eklenti aktif, proxy etkin.", "success");
+          setButtonState(btn, "connected", "Connected", "Connected via extension (click to disconnect)");
+          setMessage("Extension active, proxy enabled.", "success");
           return;
         }
-        setButtonState(btn, "ready", "Bağlan", "Tarayıcı eklentisi üzerinden bağlan");
-        setMessage("Eklenti hazır.", "");
+        setButtonState(btn, "ready", "Connect", "Connect through the browser extension");
+        setMessage("Extension ready.", "");
         return;
       }
       throw new Error("bad_pong");
@@ -169,10 +169,10 @@
       setButtonState(
         btn,
         "no-extension",
-        "Bağlan (eklenti gerekli)",
-        "Blockchain VPN tarayıcı eklentisini yükleyip etkinleştirin",
+        "Connect (extension required)",
+        "Install and enable the Blockchain VPN browser extension",
       );
-      setMessage("Blockchain VPN tarayıcı eklentisi bulunamadı.", "error");
+      setMessage("Blockchain VPN browser extension not found.", "error");
     }
   }
 
@@ -182,10 +182,10 @@
     setButtonState(
       btn,
       "busy",
-      nextEnabled ? "Bağlanıyor..." : "Bağlantı kesiliyor...",
+      nextEnabled ? "Connecting..." : "Disconnecting...",
       "",
     );
-    setMessage(nextEnabled ? "Proxy etkinleştiriliyor..." : "Proxy kapatılıyor...", "");
+    setMessage(nextEnabled ? "Enabling proxy..." : "Disabling proxy...", "");
     try {
       const resp = await callExtension(
         { type: "toggle-proxy", enabled: nextEnabled },
@@ -193,14 +193,14 @@
       );
       if (resp && resp.ok && resp.config) {
         if (resp.config.enabled) {
-          setButtonState(btn, "connected", "Bağlı", "Eklenti üzerinden bağlı (tıkla: kes)");
+          setButtonState(btn, "connected", "Connected", "Connected via extension (click to disconnect)");
           setMessage(
-            `Proxy aktif: ${resp.config.scheme || "http"}://${resp.config.host}:${resp.config.port}`,
+            `Proxy active: ${resp.config.scheme || "http"}://${resp.config.host}:${resp.config.port}`,
             "success",
           );
         } else {
-          setButtonState(btn, "ready", "Bağlan", "Tarayıcı eklentisi üzerinden bağlan");
-          setMessage("Proxy kapalı.", "");
+          setButtonState(btn, "ready", "Connect", "Connect through the browser extension");
+          setMessage("Proxy disabled.", "");
         }
         await refreshIpInfo();
         return;
@@ -214,10 +214,10 @@
       setButtonState(
         btn,
         wasConnected ? "connected" : "ready",
-        wasConnected ? "Bağlı" : "Bağlan",
-        wasConnected ? "Hata oluştu" : "Tarayıcı eklentisi üzerinden bağlan",
+        wasConnected ? "Connected" : "Connect",
+        wasConnected ? "Error occurred" : "Connect through the browser extension",
       );
-      setMessage(`Bağlanılamadı: ${describeError(err)}`, "error");
+      setMessage(`Could not connect: ${describeError(err)}`, "error");
     }
   }
 

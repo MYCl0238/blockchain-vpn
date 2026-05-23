@@ -20,7 +20,7 @@ function copyId() {
       const btn = document.querySelector(".copy-btn");
       const originalText = btn.innerText;
 
-      btn.innerText = "Kopyalandı!";
+      btn.innerText = "Copied!";
       btn.classList.remove("btn-outline-light");
       btn.classList.add("btn-success");
 
@@ -34,6 +34,6 @@ function copyId() {
       }, 2000);
     })
     .catch((err) => {
-      console.error("Kopyalama başarısız:", err);
+      console.error("Copy failed:", err);
     });
 }

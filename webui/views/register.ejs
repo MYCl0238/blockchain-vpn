@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kayıt Ol</title>
+    <title>Sign Up</title>
     <%- include('partials/icons') %>
 
     <link
@@ -18,11 +18,11 @@
     <div class="bg"></div>
 
     <div class="card-modern">
-      <h2>Hesap Oluştur</h2>
+      <h2>Create Account</h2>
 
       <p class="lead-text">
-        Cüzdanınızla imza atarak yeni bir Blockchain VPN hesabı oluşturun.
-        E-posta sonradan profil sayfasından eklenebilir.
+        Sign a message with your wallet to create a new Blockchain VPN account.
+        You can add a recovery email later from the profile page.
       </p>
 
       <button
@@ -30,15 +30,15 @@
         class="btn btn-modern btn-metamask w-100"
         data-wallet-purpose="register"
       >
-        MetaMask ile Kayıt
+        Sign up with MetaMask
       </button>
       <div id="walletError" class="wallet-error"></div>
 
       <a href="/auth/login" class="btn btn-modern btn-outline w-100 mt-2">
-        Zaten hesabınız var mı? Giriş yapın
+        Already have an account? Sign in
       </a>
       <button class="btn btn-modern w-50" onclick="window.history.back()">
-        Geri Dön
+        Back
       </button>
     </div>
     <%- include('partials/pop-up') %>

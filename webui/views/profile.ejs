@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kullanici Profili</title>
+    <title>User Profile</title>
     <%- include('partials/icons') %>
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
@@ -17,27 +17,27 @@
     <div class="bg-orb"></div>
 
     <div class="profile-card">
-      <h2>Kullanıcı Paneli</h2>
+      <h2>User Panel</h2>
 
       <div class="info-box">
-        <div class="info-label">Cüzdan Adresi</div>
+        <div class="info-label">Wallet Address</div>
         <div class="info-value mono"><%= user.wallet_address || "—" %></div>
       </div>
 
       <% if (typeof blockchainIdentity !== 'undefined' && blockchainIdentity) { %>
         <div class="info-box">
-          <div class="info-label">Blockchain Kimlik</div>
+          <div class="info-label">Blockchain Identity</div>
           <div class="info-value mono"><%= blockchainIdentity.privateMemberId %></div>
           <div class="info-sub">
-            <%= blockchainIdentity.blockCount %> blok ·
-            <%= blockchainIdentity.chainValid ? "zincir geçerli" : "zincir hatalı" %>
-            (<%= blockchainIdentity.chainBlockCount %> toplam)
+            <%= blockchainIdentity.blockCount %> blocks ·
+            <%= blockchainIdentity.chainValid ? "chain valid" : "chain invalid" %>
+            (<%= blockchainIdentity.chainBlockCount %> total)
           </div>
         </div>
 
         <% if (blockchainIdentity.latestBlock) { %>
           <div class="info-box">
-            <div class="info-label">Son Blok</div>
+            <div class="info-label">Latest Block</div>
             <div class="info-value mono">
               #<%= blockchainIdentity.latestBlock.block_index %> · <%= blockchainIdentity.latestBlock.event_type %>
             </div>
@@ -47,24 +47,23 @@
       <% } %>
 
       <div class="info-box">
-        <div class="info-label" style="text-align: center">Cihazlar</div>
-        <!-- Onceki degisiklik: Cihazlar tablo olarak listelenir ve silme islemi form ile backend'e gider. -->
+        <div class="info-label" style="text-align: center">Devices</div>
         <div class="devices-table-wrap">
           <table class="devices-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Cihaz</th>
+                <th>Device</th>
                 <th>Token</th>
-                <th>Durum</th>
-                <th>Son Gorulme</th>
-                <th>Islem</th>
+                <th>Status</th>
+                <th>Last Seen</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               <% if (!devices || devices.length === 0) { %>
                 <tr>
-                  <td colspan="6" class="empty-devices">Kayitli cihaz yok</td>
+                  <td colspan="6" class="empty-devices">No registered devices</td>
                 </tr>
               <% } %>
 
@@ -72,27 +71,29 @@
                 <% const isCurrentDevice = devices[index].device_token === currentDeviceToken; %>
                 <% const isNoiseDevice = noisePublicKey && devices[index].device_token === noisePublicKey; %>
                 <% const isActive = isCurrentDevice || isNoiseDevice || devices[index].last_active === null; %>
+                <% const tokenText = devices[index].device_token || ""; %>
+                <% const tokenShort = tokenText.length > 10 ? tokenText.slice(0, 10) + "…" : tokenText; %>
                 <tr>
                   <td><%= devices[index].id %></td>
                   <td>
-                    <%= devices[index].device_type %><% if (isNoiseDevice) { %> <span class="status-badge status-active" style="margin-left:6px">Eslestirildi</span><% } %>
+                    <%= devices[index].device_type %><% if (isNoiseDevice) { %> <span class="status-badge status-active" style="margin-left:6px">Paired</span><% } %>
                   </td>
-                  <td class="device-token"><%= devices[index].device_token %></td>
+                  <td class="device-token" title="<%= tokenText %>"><%= tokenShort %></td>
                   <td>
                     <span class="status-badge <%= isActive ? 'status-active' : 'status-passive' %>">
-                      <%= isActive ? "Aktif" : "Pasif" %>
+                      <%= isActive ? "Active" : "Passive" %>
                     </span>
                   </td>
                   <td>
-                    <%= isActive ? "-" : new Date(devices[index].last_active).toLocaleString("tr-TR") %>
+                    <%= isActive ? "-" : new Date(devices[index].last_active).toLocaleString("en-US") %>
                   </td>
                   <td>
                     <% if (isNoiseDevice) { %>
-                      <button type="button" class="delete-device-btn unpair-noise-btn">Eslestirmeyi Cikar</button>
+                      <button type="button" class="delete-device-btn unpair-noise-btn" data-token="<%= tokenText %>">Remove</button>
                     <% } else { %>
                       <form method="POST" action="/api/auth/devices/delete" class="delete-device-form">
                         <input type="hidden" name="deviceToken" value="<%= devices[index].device_token %>" />
-                        <button type="submit" class="delete-device-btn">Sil</button>
+                        <button type="submit" class="delete-device-btn">Remove</button>
                       </form>
                     <% } %>
                   </td>
@@ -103,17 +104,18 @@
         </div>
       </div>
 
-      <a href="/dashboard" class="btn btn-modern">Dashboard'a Don</a>
+      <a href="/dashboard" class="btn btn-modern">Back to Dashboard</a>
     </div>
 
     <script>
       // Noise-paired client row: webui DELETE clears noise_public_key + the
       // devices row in one shot. The desktop/mobile client's local copy of
-      // the key will be invalid on next handshake (server allowlist no
-      // longer has it), so the user can re-pair from there.
+      // the key is invalidated on the next handshake (server allowlist no
+      // longer has it), so removing a paired device here is what locks it
+      // out of the VPN until the user re-pairs.
       document.querySelectorAll(".unpair-noise-btn").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          if (!confirm("Bu cihazin eslestirmesini cikarmak istediginizden emin misiniz?")) return;
+          if (!confirm("Remove this paired device? It will no longer be able to connect until you re-pair.")) return;
           btn.disabled = true;
           try {
             const res = await fetch("/api/wallet/noise-identity", {
@@ -126,7 +128,7 @@
             }
             window.location.reload();
           } catch (e) {
-            alert("Eslestirme cikarilamadi: " + e.message);
+            alert("Could not unpair: " + e.message);
             btn.disabled = false;
           }
         });

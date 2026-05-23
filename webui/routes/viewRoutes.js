@@ -30,7 +30,7 @@ router.get("/dashboard", requireLogin, async (req, res) => {
     res.render("dashboard.ejs", { newRegistration });
   } catch (err) {
     console.error("Dashboard yüklenirken hata:", err);
-    res.status(500).send("Sunucu hatası");
+    res.status(500).send("Server error");
   }
 });
 
@@ -60,7 +60,7 @@ router.get("/user/profile", requireLogin, async (req, res) => {
     });
   } catch (error) {
     console.error("Profil yüklenirken hata:", error);
-    res.status(500).send("Sunucu hatası");
+    res.status(500).send("Server error");
   }
 });
 

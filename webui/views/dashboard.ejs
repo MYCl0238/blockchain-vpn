@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>VPN Dashboard</title>
@@ -13,7 +13,7 @@
   </head>
 
   <body class="d-flex justify-content-center align-items-center vh-100">
-    
+
     <div class="bg-glow"></div>
 
     <div class="dashboard text-center">
@@ -21,13 +21,13 @@
 
       <div class="status-box">
         <div class="status-dot"></div>
-        <span>Bağlantı aktif ve güvenli</span>
+        <span>Connection active and secure</span>
       </div>
 
       <div class="connection">
-        Sunucu: <span class="server" id="serverLocation">Yükleniyor...</span><br />
-        IP: <span id="serverIp">Yükleniyor...</span><br />
-        Sağlayıcı: <span id="serverIsp">Yükleniyor...</span>
+        Server: <span class="server" id="serverLocation">Loading...</span><br />
+        IP: <span id="serverIp">Loading...</span><br />
+        Provider: <span id="serverIsp">Loading...</span>
       </div>
 
       <button
@@ -36,32 +36,32 @@
         type="button"
         disabled
         data-status="probing"
-        title="Tarayıcı eklentisi aranıyor..."
+        title="Looking for the browser extension..."
       >
-        Eklenti aranıyor...
+        Looking for extension...
       </button>
 
       <div id="connectMessage" class="small text-muted mb-2" role="status" aria-live="polite"></div>
 
       <a href="/user/profile" class="btn btn-info w-100 btn-glow mb-2">
-        Kullanıcı Paneli
+        User Panel
       </a>
 
       <a href="/auth/desktop-pairing" class="btn btn-secondary w-100 btn-glow mb-2">
-        Masaüstü İstemciyi Eşleştir
+        Pair Desktop Client
       </a>
 
       <form method="POST" action="/api/auth/logout">
-        <button class="btn btn-danger w-100 btn-glow">Bağlantıyı Kes</button>
+        <button class="btn btn-danger w-100 btn-glow">Sign Out</button>
       </form>
     </div>
     <% if (typeof newRegistration !== 'undefined' && newRegistration) { %>
       <div id="welcomePopup" class="popup-overlay">
         <div class="popup-card">
           <button class="close-btn" onclick="closePopup()">&times;</button>
-          <h3 class="text-success mb-3" style="font-weight: 700;">Hesabınız oluşturuldu! 🎉</h3>
+          <h3 class="text-success mb-3" style="font-weight: 700;">Your account is ready! 🎉</h3>
           <p class="mb-4" style="color: #9ca3af; font-size: 14px;">
-            Cüzdanınız hesabınıza bağlandı. Kimlik detaylarınızı Kullanıcı Paneli'nden görüntüleyebilirsiniz.
+            Your wallet is now linked. You can view your identity details on the User Panel.
           </p>
         </div>
       </div>
@@ -69,7 +69,7 @@
     <% } %>
 
     <script src="/js/dashboard/dashboard-api.js">
-      
+
     </script>
 
   </body>
