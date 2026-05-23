@@ -7,7 +7,7 @@ import {
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import AppButton from '../lib/ui/AppButton';
@@ -38,6 +38,10 @@ export default function DashboardScreen() {
 
   const [signatureInput, setSignatureInput] = useState('');
   const [publicIp, setPublicIp] = useState<string | null>(null);
+  // The public IP seen while disconnected (the user's real egress IP). Used
+  // to reject the first post-connect probe result, which races the tunnel
+  // route still being installed and would otherwise flash the real IP.
+  const directIpRef = useRef<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -99,7 +103,6 @@ export default function DashboardScreen() {
   // wins. We poll for up to ~30s in case the tunnel is still settling.
   // Plugin-http is required on Tauri (libsoup3 quirks on webkit2gtk).
   useEffect(() => {
-    if (!connected) return;
     let cancelled = false;
     // Tauri's webview needs plugin-http to bypass libsoup3; React Native
     // (Android) just uses the platform fetch, which goes through the
@@ -112,25 +115,60 @@ export default function DashboardScreen() {
       'https://ipv4.icanhazip.com',
       'https://v4.ident.me',
     ];
+    const probeOnce = async (): Promise<string | null> => {
+      for (const url of endpoints) {
+        if (cancelled) return null;
+        try {
+          const r = await fetcher(url, { method: 'GET' });
+          if (r.ok) {
+            const t = (await r.text()).trim();
+            if (/^\d{1,3}(\.\d{1,3}){3}$/.test(t)) return t;
+          }
+        } catch {
+          // tunnel may still be settling — try the next endpoint
+        }
+      }
+      return null;
+    };
+
+    if (!connected) {
+      // Disconnected: remember the real egress IP so we can tell the
+      // tunnel apart from it once connected. Don't show it as the
+      // "through tunnel" value.
+      setPublicIp(null);
+      (async () => {
+        const ip = await probeOnce();
+        if (!cancelled && ip) directIpRef.current = ip;
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Connected: the displayed IP must be the one *through* the tunnel.
+    // On first connect the route can still be installing, so an early
+    // probe returns the real (direct) IP — reject that and keep polling.
+    // Accept immediately when we see the server's egress IP; otherwise
+    // accept any IP that differs from the known direct IP. As a last
+    // resort after the budget, show whatever we last saw.
+    const expectedIp = DEFAULT_CONFIG.serverHost;
+    const directIp = directIpRef.current;
     (async () => {
+      let lastSeen: string | null = null;
       for (let attempt = 0; attempt < 30 && !cancelled; attempt++) {
-        for (const url of endpoints) {
-          if (cancelled) return;
-          try {
-            const r = await fetcher(url, { method: 'GET' });
-            if (r.ok) {
-              const t = (await r.text()).trim();
-              if (!cancelled && /^\d{1,3}(\.\d{1,3}){3}$/.test(t)) {
-                setPublicIp(t);
-                return;
-              }
-            }
-          } catch {
-            // tunnel may still be settling — try the next endpoint
+        const t = await probeOnce();
+        if (t) {
+          lastSeen = t;
+          if (t === expectedIp || (directIp && t !== directIp)) {
+            if (!cancelled) setPublicIp(t);
+            return;
           }
         }
         await new Promise((res) => setTimeout(res, 1000));
       }
+      // Budget exhausted without a clear tunnel IP — surface the last
+      // value rather than spinning "Detecting…" forever.
+      if (!cancelled && lastSeen) setPublicIp(lastSeen);
     })();
     return () => {
       cancelled = true;
