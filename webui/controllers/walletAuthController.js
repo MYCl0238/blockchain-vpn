@@ -13,6 +13,7 @@ import {
   getNoisePublicKey,
   verifyAndBindNoiseIdentity,
   walletNoiseIdentityMessage,
+  unbindNoiseIdentityForUser,
 } from "../services/noiseIdentityService.js";
 
 export const createWalletNonce = async (req, res) => {
@@ -206,7 +207,7 @@ export const bindNoiseIdentity = async (req, res) => {
         error: "Wallet not bound — link a wallet before deriving a Noise identity.",
       });
     }
-    const { signature } = req.body || {};
+    const { signature, deviceType } = req.body || {};
     if (!signature) {
       return res.status(400).json({ error: "signature required" });
     }
@@ -214,6 +215,8 @@ export const bindNoiseIdentity = async (req, res) => {
     const { noisePublicKey } = await verifyAndBindNoiseIdentity(pool, {
       user,
       signature,
+      // 'desktop' (linux/win), 'mobile' (android), 'web' (sign-from-webui flow).
+      deviceType: typeof deviceType === "string" && deviceType ? deviceType : "desktop",
     });
 
     await createBlock(pool, {
@@ -230,6 +233,33 @@ export const bindNoiseIdentity = async (req, res) => {
     return res.json({ ok: true, noisePublicKey });
   } catch (error) {
     console.error("NOISE IDENTITY BIND error", error);
+    return res.status(400).json({ error: walletErrorMessage(error) });
+  }
+};
+
+// DELETE /api/wallet/noise-identity
+// Clears users.noise_public_key + removes the paired-client row from
+// devices. The session-bound user is authoritative here — no extra
+// signature required since the user is already logged in.
+export const unbindNoiseIdentity = async (req, res) => {
+  try {
+    const user = await getUser(pool, req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+    const { previousNoisePublicKey } = await unbindNoiseIdentityForUser(pool, user.id);
+
+    if (previousNoisePublicKey) {
+      await createBlock(pool, {
+        userId: user.id,
+        eventType: "PARTNER_NOISE_IDENTITY_UNBOUND",
+        payload: { noisePubKeyHash: hashPrivateValue(previousNoisePublicKey) },
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("NOISE IDENTITY UNBIND error", error);
     return res.status(400).json({ error: walletErrorMessage(error) });
   }
 };

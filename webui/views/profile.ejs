@@ -70,10 +70,13 @@
 
               <% for( let index = 0; index < devices.length; index++ ) { %>
                 <% const isCurrentDevice = devices[index].device_token === currentDeviceToken; %>
-                <% const isActive = isCurrentDevice || devices[index].last_active === null; %>
+                <% const isNoiseDevice = noisePublicKey && devices[index].device_token === noisePublicKey; %>
+                <% const isActive = isCurrentDevice || isNoiseDevice || devices[index].last_active === null; %>
                 <tr>
                   <td><%= devices[index].id %></td>
-                  <td><%= devices[index].device_type %></td>
+                  <td>
+                    <%= devices[index].device_type %><% if (isNoiseDevice) { %> <span class="status-badge status-active" style="margin-left:6px">Eslestirildi</span><% } %>
+                  </td>
                   <td class="device-token"><%= devices[index].device_token %></td>
                   <td>
                     <span class="status-badge <%= isActive ? 'status-active' : 'status-passive' %>">
@@ -84,10 +87,14 @@
                     <%= isActive ? "-" : new Date(devices[index].last_active).toLocaleString("tr-TR") %>
                   </td>
                   <td>
-                    <form method="POST" action="/api/auth/devices/delete" class="delete-device-form">
-                      <input type="hidden" name="deviceToken" value="<%= devices[index].device_token %>" />
-                      <button type="submit" class="delete-device-btn">Sil</button>
-                    </form>
+                    <% if (isNoiseDevice) { %>
+                      <button type="button" class="delete-device-btn unpair-noise-btn">Eslestirmeyi Cikar</button>
+                    <% } else { %>
+                      <form method="POST" action="/api/auth/devices/delete" class="delete-device-form">
+                        <input type="hidden" name="deviceToken" value="<%= devices[index].device_token %>" />
+                        <button type="submit" class="delete-device-btn">Sil</button>
+                      </form>
+                    <% } %>
                   </td>
                 </tr>
               <% } %>
@@ -98,5 +105,32 @@
 
       <a href="/dashboard" class="btn btn-modern">Dashboard'a Don</a>
     </div>
+
+    <script>
+      // Noise-paired client row: webui DELETE clears noise_public_key + the
+      // devices row in one shot. The desktop/mobile client's local copy of
+      // the key will be invalid on next handshake (server allowlist no
+      // longer has it), so the user can re-pair from there.
+      document.querySelectorAll(".unpair-noise-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Bu cihazin eslestirmesini cikarmak istediginizden emin misiniz?")) return;
+          btn.disabled = true;
+          try {
+            const res = await fetch("/api/wallet/noise-identity", {
+              method: "DELETE",
+              credentials: "include",
+            });
+            if (!res.ok) {
+              const j = await res.json().catch(() => ({}));
+              throw new Error(j.error || ("HTTP " + res.status));
+            }
+            window.location.reload();
+          } catch (e) {
+            alert("Eslestirme cikarilamadi: " + e.message);
+            btn.disabled = false;
+          }
+        });
+      });
+    </script>
   </body>
 </html>

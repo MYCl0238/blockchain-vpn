@@ -1,0 +1,54 @@
+# Build the Blockchain VPN Tauri AppImage on Debian 12 (bookworm, glibc 2.36)
+# so the bundled webkit2gtk + friends don't pull in GLIBC symbols newer than
+# what mainstream distros (Ubuntu 22.04+, Fedora 38+, Nobara, Mint, Pop) ship.
+#
+# Usage (from apps/cross-platform-app):
+#   podman build -f Dockerfile.appimage -t bvpn-appimage-builder .
+#   podman run --rm -v "$PWD":/src -w /src bvpn-appimage-builder \
+#     bash -lc "npm ci && npm run tauri:build -- --bundles appimage"
+#
+# Resulting AppImage lands in src-tauri/target/release/bundle/appimage/.
+
+FROM debian:bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base build tools + Tauri Linux runtime deps. webkit2gtk-4.1 + libsoup-3 are
+# the modern combo (Tauri 2.x); rsvg + ayatana for menus/icons.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget file build-essential pkg-config git \
+      libwebkit2gtk-4.1-dev \
+      libgtk-3-dev \
+      libayatana-appindicator3-dev \
+      librsvg2-dev \
+      libssl-dev \
+      libsoup-3.0-dev \
+      libjavascriptcoregtk-4.1-dev \
+      patchelf \
+      fuse libfuse2 desktop-file-utils \
+      xdg-utils \
+      xz-utils zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20.x (Tauri 2 + Expo need >= 18; pick a current LTS).
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Yarn 1.x — npm 10's Arborist resolver hangs on the Expo + Tauri + RN dep
+# tree (large peer-dep graph). Yarn handles it cleanly in ~3 min.
+RUN npm install -g yarn --no-audit --no-fund
+
+# Rust via rustup (the Debian-bookworm rustc is too old for current tauri-cli).
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustc --version && cargo --version
+
+# Pre-cache the linuxdeploy + appimagetool binaries Tauri downloads at bundle
+# time so the build doesn't hit GitHub for them each run (and so offline builds
+# still work). Tauri 2.x looks under ~/.cache/tauri/. Mounted volume gets these
+# cached files via the env var below.
+ENV TAURI_CACHE_DIR=/work/.tauri-cache
+
+WORKDIR /src

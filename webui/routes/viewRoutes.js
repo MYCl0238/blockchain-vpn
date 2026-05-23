@@ -54,6 +54,9 @@ router.get("/user/profile", requireLogin, async (req, res) => {
       devices,
       currentDeviceToken,
       blockchainIdentity,
+      // Noise pairing's device row stores the Noise pubkey as device_token —
+      // the template uses this to render "Eslestirmeyi Cikar" for that row.
+      noisePublicKey: user?.noise_public_key || null,
     });
   } catch (error) {
     console.error("Profil yüklenirken hata:", error);

@@ -177,7 +177,16 @@ export default function DashboardScreen() {
 
   async function openPairingPage() {
     try {
-      await Linking.openURL(PAIRING_URL);
+      if (IS_TAURI) {
+        // Inside the Tauri webview, Linking.openURL bottoms out at
+        // window.open which the webview swallows (no external browser).
+        // tauri-plugin-opener shells out to xdg-open / KDE's kfmclient /
+        // start, which works across desktops without xdg-utils quirks.
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(PAIRING_URL);
+      } else {
+        await Linking.openURL(PAIRING_URL);
+      }
     } catch (e: any) {
       setError(e?.message ?? 'could not open browser');
     }

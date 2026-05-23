@@ -118,7 +118,7 @@
               method: "POST",
               credentials: "include",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ signature }),
+              body: JSON.stringify({ signature, deviceType: "desktop" }),
             });
             const bindBody = await bindResp.json();
             if (!bindResp.ok) throw new Error(bindBody.error || "Sunucuya bağlama başarısız.");

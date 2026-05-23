@@ -157,6 +157,9 @@ set BVPN_HOST=127.0.0.1
 set BVPN_PORT=8787
 set BVPN_DATA_DIR=$DataDst
 set BVPN_LOG_FILE=$LogsDst\control-plane.log
+rem daemon.js defaults BVPN_TUN_CLIENT_BIN to /usr/local/bin/... on Linux — pin
+rem it to the installed Windows .exe so the spawn() finds it.
+set BVPN_TUN_CLIENT_BIN=$BinDst\blockchain-vpn-tun-client.exe
 set PATH=$BinDst;%PATH%
 "$nodeExe" "$CtrlDst\daemon.js" 1>>"$LogsDst\control-plane.log" 2>&1
 "@

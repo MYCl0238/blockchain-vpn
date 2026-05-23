@@ -68,7 +68,7 @@ export function derivePublicKeyFromSignature(signatureHex) {
   return publicKeyDer.slice(publicKeyDer.length - 32).toString("hex");
 }
 
-export async function verifyAndBindNoiseIdentity(db, { user, signature }) {
+export async function verifyAndBindNoiseIdentity(db, { user, signature, deviceType }) {
   if (!user?.wallet_address) {
     throw new Error("User has no wallet — bind a wallet before deriving the Noise key.");
   }
@@ -97,7 +97,78 @@ export async function verifyAndBindNoiseIdentity(db, { user, signature }) {
     [noisePublicKey, user.id],
   );
 
+  // 4. Surface the pairing on the user's devices panel. device_token holds
+  //    the Noise pubkey verbatim so it's a stable, globally-unique handle
+  //    for the paired client (no separate identifier to track). The slot
+  //    range allows up to 5 rows per user; pick the lowest free slot.
+  await upsertNoiseDeviceRow(db, user.id, noisePublicKey, deviceType || "desktop");
+
   return { noisePublicKey };
+}
+
+async function upsertNoiseDeviceRow(db, userId, noisePublicKey, deviceType) {
+  // If this Noise key is already on the user as a device row, just bump
+  // last_active to NULL (= currently online) and exit.
+  const existing = await db.query(
+    "SELECT id FROM devices WHERE user_id = $1 AND device_token = $2",
+    [userId, noisePublicKey],
+  );
+  if (existing.rows.length) {
+    await db.query(
+      "UPDATE devices SET last_active = NULL, device_type = $1 WHERE user_id = $2 AND device_token = $3",
+      [deviceType, userId, noisePublicKey],
+    );
+    return;
+  }
+
+  // Pick lowest free slot in 1..5 (table CHECK constraint).
+  const used = await db.query(
+    "SELECT id FROM devices WHERE user_id = $1 ORDER BY id ASC",
+    [userId],
+  );
+  const usedIds = new Set(used.rows.map((r) => r.id));
+  let slot = 0;
+  for (let i = 1; i <= 5; i++) {
+    if (!usedIds.has(i)) { slot = i; break; }
+  }
+  if (slot === 0) {
+    // 5 devices already; silently skip the row insertion. The pairing is
+    // still recorded on users.noise_public_key — the user will need to
+    // free a slot on the devices panel to see it listed.
+    return;
+  }
+
+  await db.query(
+    "INSERT INTO devices (id, user_id, device_type, device_token, last_active) VALUES ($1, $2, $3, $4, NULL)",
+    [slot, userId, deviceType, noisePublicKey],
+  );
+}
+
+// Clears the user's Noise binding and removes the corresponding device row.
+// Triggered by the webui's "Unpair" button on the profile page (the desktop
+// daemon also has its own local /v1/noise/unbind to wipe its on-disk key,
+// but server state is authoritative — the tun-server's allowlist polls
+// users.noise_public_key).
+export async function unbindNoiseIdentityForUser(db, userId) {
+  const userRow = await db.query(
+    "SELECT noise_public_key FROM users WHERE id = $1",
+    [userId],
+  );
+  const pub = userRow.rows[0]?.noise_public_key;
+  await db.query(
+    `UPDATE users
+     SET noise_public_key = NULL,
+         noise_bound_at   = NULL
+     WHERE id = $1`,
+    [userId],
+  );
+  if (pub) {
+    await db.query(
+      "DELETE FROM devices WHERE user_id = $1 AND device_token = $2",
+      [userId, pub],
+    );
+  }
+  return { previousNoisePublicKey: pub || null };
 }
 
 export async function getNoisePublicKey(db, userId) {

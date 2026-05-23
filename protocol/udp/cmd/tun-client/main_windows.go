@@ -1,9 +1,19 @@
 //go:build windows
 
+// blockchain-vpn-tun-client (Noise IK edition, Windows).
+//
+// Mirrors cmd/tun-client/main.go (Linux), but uses wintun + winipcfg for the
+// TUN device and route management. The on-wire protocol is identical:
+//
+//	[ PV1 | FrameHandshakeA | ne | ns | ciphertext ]  client → server (once)
+//	[ PV1 | FrameHandshakeB | ne | ciphertext       ] server → client (once)
+//	[ PV1 | FrameTransport  | ciphertext            ] either direction (steady state)
+
 package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,7 +30,11 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"blockchain-vpn/protocol/udp/internal/noise"
 )
+
+const handshakeTimeout = 5 * time.Second
 
 type worker struct {
 	tunName         string
@@ -30,6 +44,8 @@ type worker struct {
 	localListen     string
 	routeDefault    bool
 	mtu             int
+	noiseKeyPath    string
+	serverPubHex    string
 	tunDev          tun.Device
 	udpConn         *net.UDPConn
 	tunPrefix       netip.Prefix
@@ -37,6 +53,11 @@ type worker struct {
 	serverRouteLUID *winipcfg.LUID
 	serverRouteDest netip.Prefix
 	serverRouteNext netip.Addr
+
+	static    noise.Keypair
+	serverPub [32]byte
+	prologue  []byte
+	session   *noise.Session
 }
 
 func main() {
@@ -48,7 +69,15 @@ func main() {
 	flag.StringVar(&w.localListen, "bind", ":0", "Local UDP bind address")
 	flag.BoolVar(&w.routeDefault, "route-default", false, "Route default traffic through TUN")
 	flag.IntVar(&w.mtu, "mtu", 1380, "MTU for TUN interface")
+	flag.StringVar(&w.noiseKeyPath, "noise-key", "",
+		"Path to 32-byte X25519 client static private key (derived from wallet signature)")
+	flag.StringVar(&w.serverPubHex, "server-pubkey", "",
+		"Server's pinned X25519 static public key, hex (64 chars)")
 	flag.Parse()
+
+	if w.noiseKeyPath == "" || w.serverPubHex == "" {
+		log.Fatal("both --noise-key and --server-pubkey are required (wallet derivation must run first)")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -59,6 +88,11 @@ func main() {
 }
 
 func (w *worker) run(ctx context.Context) error {
+	if err := w.loadIdentity(); err != nil {
+		return fmt.Errorf("load identity: %w", err)
+	}
+	w.prologue = []byte("blockchain-vpn-v1")
+
 	serverAddr, err := net.ResolveUDPAddr("udp", w.serverAddr)
 	if err != nil {
 		return err
@@ -82,6 +116,11 @@ func (w *worker) run(ctx context.Context) error {
 
 	log.Printf("tun-client running (windows): tun=%s cidr=%s local=%s server=%s routeDefault=%v", w.tunName, w.tunCIDR, w.udpConn.LocalAddr(), w.serverAddr, w.routeDefault)
 
+	if err := w.handshake(); err != nil {
+		return fmt.Errorf("noise handshake: %w", err)
+	}
+	log.Printf("noise handshake complete with server %s", w.serverAddr)
+
 	errCh := make(chan error, 2)
 	go func() { errCh <- w.loopUDPToTun(ctx) }()
 	go func() { errCh <- w.loopTunToUDP(ctx) }()
@@ -96,6 +135,76 @@ func (w *worker) run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func (w *worker) loadIdentity() error {
+	priv, err := os.ReadFile(w.noiseKeyPath)
+	if err != nil {
+		return fmt.Errorf("read noise key %s: %w", w.noiseKeyPath, err)
+	}
+	if len(priv) != 32 {
+		return fmt.Errorf("noise key %s is %d bytes, expected 32", w.noiseKeyPath, len(priv))
+	}
+	var seed [32]byte
+	copy(seed[:], priv)
+	w.static = noise.KeypairFromSeed(seed)
+
+	pub, err := hex.DecodeString(strings.TrimSpace(w.serverPubHex))
+	if err != nil {
+		return fmt.Errorf("parse --server-pubkey: %w", err)
+	}
+	if len(pub) != 32 {
+		return fmt.Errorf("--server-pubkey is %d bytes, expected 32", len(pub))
+	}
+	copy(w.serverPub[:], pub)
+	log.Printf("client static pubkey: %x", w.static.Public[:])
+	log.Printf("server pinned pubkey:  %x", w.serverPub[:])
+	return nil
+}
+
+func (w *worker) handshake() error {
+	w.session = noise.NewInitiator(w.prologue, w.static, w.serverPub)
+
+	msgA, err := w.session.WriteHandshake(nil)
+	if err != nil {
+		return fmt.Errorf("WriteHandshakeA: %w", err)
+	}
+	wireA := noise.MarshalHandshakeA(msgA)
+	if _, err := w.udpConn.Write(wireA); err != nil {
+		return fmt.Errorf("send msg A: %w", err)
+	}
+
+	if err := w.udpConn.SetReadDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		return err
+	}
+	defer w.udpConn.SetReadDeadline(time.Time{})
+
+	buf := make([]byte, 65535)
+	n, err := w.udpConn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("await msg B: %w", err)
+	}
+	version, frameType, body, err := noise.ParseFrame(buf[:n])
+	if err != nil {
+		return fmt.Errorf("parse msg B frame: %w", err)
+	}
+	if version != noise.PV1 {
+		return fmt.Errorf("unexpected protocol version %d in msg B", version)
+	}
+	if frameType != noise.FrameHandshakeB {
+		return fmt.Errorf("expected FrameHandshakeB, got frame type %d", frameType)
+	}
+	msgB, err := noise.ParseHandshakeB(body)
+	if err != nil {
+		return fmt.Errorf("parse msg B: %w", err)
+	}
+	if _, err := w.session.ReadHandshake(msgB); err != nil {
+		return fmt.Errorf("ReadHandshakeB: %w", err)
+	}
+	if !w.session.HandshakeComplete() {
+		return fmt.Errorf("session not complete after msg B")
+	}
+	return nil
 }
 
 func (w *worker) setupTun(serverAddr *net.UDPAddr) error {
@@ -262,26 +371,35 @@ func bestDefaultRoute() (*winipcfg.MibIPforwardRow2, error) {
 }
 
 func (w *worker) loopUDPToTun(ctx context.Context) error {
-	batchSize := w.tunDev.BatchSize()
-	if batchSize < 1 {
-		batchSize = 1
-	}
-	bufs := make([][]byte, batchSize)
-	sizes := make([]int, batchSize)
-	for i := range bufs {
-		bufs[i] = make([]byte, 65535)
-	}
+	buf := make([]byte, 65535)
 	for {
-		n, err := w.udpConn.Read(bufs[0])
+		n, err := w.udpConn.Read(buf)
 		if err != nil {
 			if ctx.Err() != nil {
 				return context.Canceled
 			}
 			return err
 		}
-		sizes[0] = n
-		packet := [][]byte{bufs[0][:n]}
-		if _, err := w.tunDev.Write(packet, 0); err != nil {
+		version, frameType, body, err := noise.ParseFrame(buf[:n])
+		if err != nil {
+			log.Printf("drop short frame (%d bytes)", n)
+			continue
+		}
+		if version != noise.PV1 || frameType != noise.FrameTransport {
+			log.Printf("drop unexpected frame v=%d type=%d", version, frameType)
+			continue
+		}
+		t, err := noise.ParseTransport(body)
+		if err != nil {
+			log.Printf("malformed transport frame: %v", err)
+			continue
+		}
+		plaintext, err := w.session.Decrypt(t)
+		if err != nil {
+			log.Printf("Decrypt failed: %v", err)
+			continue
+		}
+		if _, err := w.tunDev.Write([][]byte{plaintext}, 0); err != nil {
 			if ctx.Err() != nil {
 				return context.Canceled
 			}
@@ -317,7 +435,13 @@ func (w *worker) loopTunToUDP(ctx context.Context) error {
 			if !inTunnelPrefix(pkt, w.tunPrefix) {
 				continue
 			}
-			if _, err := w.udpConn.Write(pkt); err != nil {
+			ct, err := w.session.Encrypt(pkt)
+			if err != nil {
+				log.Printf("Encrypt failed: %v", err)
+				continue
+			}
+			wire := noise.MarshalTransport(ct)
+			if _, err := w.udpConn.Write(wire); err != nil {
 				if ctx.Err() != nil {
 					return context.Canceled
 				}
