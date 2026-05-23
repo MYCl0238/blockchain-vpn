@@ -36,6 +36,11 @@ mobile/android/libs/*.aar
 # Release staging dir — artifacts uploaded via `gh release` instead
 releases/
 
+# Windows installer payload — bundled binaries assembled at build time
+# (node.exe from nodejs.org + app.exe/tun-client.exe/wintun.dll/daemon.js,
+# all build outputs). The blockchain-vpn.nsi documents the expected layout.
+installer/win/payload/
+
 # Vendored app build artifacts
 apps/cross-platform-app/node_modules/
 apps/cross-platform-app/dist/
