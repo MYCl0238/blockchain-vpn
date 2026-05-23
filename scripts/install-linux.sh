@@ -29,6 +29,7 @@ USER_NAME="${SUDO_USER:-$USER}"
 USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 DESKTOP_BIN_DIR="$USER_HOME/.local/bin"
 DESKTOP_APP_DIR="$USER_HOME/.local/share/applications"
+DESKTOP_ICON_DIR="$USER_HOME/.local/share/icons/hicolor/512x512/apps"
 TMP="$(mktemp -d -t bvpn-install-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -182,6 +183,40 @@ if [[ -n "${SUDO_USER:-}" ]]; then
   chown "$USER_NAME":"$USER_NAME" "$DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage"
 fi
 
+# Extract the icon out of the AppImage's squashfs payload so the menu entry
+# can show it. The Tauri-built AppImage ships its app icon as a top-level
+# PNG; --appimage-extract drops a squashfs-root/ dir we can pluck it from.
+step "Extracting application icon"
+install -d -m 0755 "$DESKTOP_ICON_DIR"
+ICON_DST="$DESKTOP_ICON_DIR/blockchain-vpn.png"
+(
+  cd "$TMP"
+  "$DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage" --appimage-extract \
+    'Blockchain VPN.png' >/dev/null 2>&1 \
+    || "$DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage" --appimage-extract \
+       '*.png' >/dev/null 2>&1 \
+    || true
+  # Prefer the named icon; fall back to anything that looks reasonable.
+  SRC_ICON=""
+  if [[ -f "squashfs-root/Blockchain VPN.png" ]]; then
+    SRC_ICON="squashfs-root/Blockchain VPN.png"
+  elif [[ -f "squashfs-root/app.png" ]]; then
+    SRC_ICON="squashfs-root/app.png"
+  else
+    SRC_ICON="$(find squashfs-root -maxdepth 2 -name '*.png' -size +5k 2>/dev/null | head -1)"
+  fi
+  if [[ -n "$SRC_ICON" && -f "$SRC_ICON" ]]; then
+    install -m 0644 "$SRC_ICON" "$ICON_DST"
+  fi
+  rm -rf squashfs-root
+) || true
+if [[ ! -f "$ICON_DST" ]]; then
+  warn "Could not extract icon from AppImage — menu entry will show a generic icon."
+fi
+if [[ -n "${SUDO_USER:-}" && -f "$ICON_DST" ]]; then
+  chown -R "$USER_NAME":"$USER_NAME" "$USER_HOME/.local/share/icons" 2>/dev/null || true
+fi
+
 step "Writing menu entry to $DESKTOP_APP_DIR"
 install -d -m 0755 "$DESKTOP_APP_DIR"
 cat > "$DESKTOP_APP_DIR/blockchain-vpn.desktop" <<EOF
@@ -191,6 +226,7 @@ Name=Blockchain VPN
 GenericName=VPN Client
 Comment=Wallet-paired Noise IK VPN client
 Exec=$DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage %U
+Icon=blockchain-vpn
 Terminal=false
 Categories=Network;Security;
 StartupNotify=true
@@ -199,6 +235,11 @@ Keywords=VPN;Privacy;Network;
 EOF
 if [[ -n "${SUDO_USER:-}" ]]; then
   chown "$USER_NAME":"$USER_NAME" "$DESKTOP_APP_DIR/blockchain-vpn.desktop"
+fi
+
+# Refresh icon cache so DEs notice the new file without a logout.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t "$USER_HOME/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 
 # Refresh the desktop database if the tool is around (purely cosmetic;
@@ -227,5 +268,6 @@ Uninstall:
   sudo rm -rf /usr/share/blockchain-vpn /var/lib/blockchain-vpn
   rm $DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage
   rm $DESKTOP_APP_DIR/blockchain-vpn.desktop
+  rm -f $DESKTOP_ICON_DIR/blockchain-vpn.png
 
 EOF
