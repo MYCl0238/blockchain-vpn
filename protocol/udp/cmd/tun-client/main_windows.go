@@ -231,8 +231,22 @@ func (w *worker) setupTun(serverAddr *net.UDPAddr) error {
 		return err
 	}
 
-	if err := luid.SetIPAddresses([]netip.Prefix{tunPrefix}); err != nil {
-		return fmt.Errorf("set tun address: %w", err)
+	// Assign the tunnel address via netsh rather than winipcfg's
+	// SetIPAddresses. SetIPAddresses (CreateUnicastIpAddressEntry) registers
+	// the address but, in this wireguard-go/winipcfg combo, does NOT plumb the
+	// local /32 delivery route into the loopback compartment. Without that
+	// route Windows treats every inbound tunnel packet to our own tunnel IP as
+	// "Not locally destined" and drops it at the IP layer (ipInAddrErrors) —
+	// the TCP handshake's SYN+ACK never reaches the socket, so nothing through
+	// the tunnel ever completes. `netsh ... set address static` (like
+	// New-NetIPAddress) creates the address AND the local route, so packets to
+	// 10.99.0.x are delivered locally. See cmd/tun-client/main_windows.go
+	// history / project memory "windows-outstanding" for the full diagnosis.
+	mask := netipPrefixToIPv4Mask(tunPrefix)
+	if err := run("netsh", "interface", "ipv4", "set", "address",
+		fmt.Sprintf("name=%s", w.tunName), "static",
+		w.tunAddr.String(), mask); err != nil {
+		return fmt.Errorf("set tun address via netsh: %w", err)
 	}
 
 	ipif, err := luid.IPInterface(windows.AF_INET)
@@ -303,6 +317,27 @@ func (w *worker) cleanupTun() {
 	if w.tunDev != nil {
 		_ = w.tunDev.Close()
 	}
+}
+
+// run executes a command and returns a wrapped error including its output.
+func run(cmd string, args ...string) error {
+	c := exec.Command(cmd, args...)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %v: %w: %s", cmd, args, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// netipPrefixToIPv4Mask renders the dotted-decimal subnet mask for a prefix
+// (e.g. /24 -> "255.255.255.0"), as netsh's `set address static` wants.
+func netipPrefixToIPv4Mask(p netip.Prefix) string {
+	bits := p.Bits()
+	if bits < 0 {
+		bits = 32
+	}
+	var mask uint32 = 0xffffffff << (32 - uint(bits))
+	return fmt.Sprintf("%d.%d.%d.%d", byte(mask>>24), byte(mask>>16), byte(mask>>8), byte(mask))
 }
 
 func (w *worker) pinServerRoute(serverAddr *net.UDPAddr) error {
