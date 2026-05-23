@@ -118,7 +118,7 @@ print(matches[0]['browser_download_url']) if matches else sys.exit(1)
 }
 
 APPIMAGE_URL="${BVPN_APPIMAGE_URL:-$(asset_url 'AppImage$' || true)}"
-TARBALL_URL="${BVPN_TARBALL_URL:-$(asset_url '^blockchain-vpn-linux.*\\.tar\\.gz$' || true)}"
+TARBALL_URL="${BVPN_TARBALL_URL:-$(asset_url '^blockchain-vpn-linux.*\.tar\.gz$' || true)}"
 [[ -n "$APPIMAGE_URL" ]] || die "Could not find an AppImage asset in this release."
 [[ -n "$TARBALL_URL" ]] || die "Could not find a Linux backend tarball in this release."
 
@@ -208,17 +208,16 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 # -------------------------------------------------------------------- done
+# Heredocs don't interpret \033, so use printf for the colored line.
+printf '\n\033[1;32mBlockchain VPN installed.\033[0m\n\n'
 cat <<EOF
-
-\033[1;32mBlockchain VPN installed.\033[0m
-
   Desktop app    : $DESKTOP_BIN_DIR/blockchain-vpn-desktop.AppImage
   App-menu entry : Blockchain VPN
   Daemon         : systemctl status blockchain-vpn-control-plane
 
 Next step:
-  Launch \"Blockchain VPN\" from your app menu (or run the AppImage above).
-  On first start the dashboard shows a \"Pair this device\" screen — open the
+  Launch "Blockchain VPN" from your app menu (or run the AppImage above).
+  On first start the dashboard shows a "Pair this device" screen — open the
   pairing page in your browser, sign with MetaMask, paste the signature.
 
 Uninstall:
